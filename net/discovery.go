@@ -3,7 +3,6 @@ package net
 import (
         "net"
         "log"
-        //"sync"
         "time"
         "github.com/google/uuid"
 )
