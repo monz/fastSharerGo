@@ -21,7 +21,7 @@ type FileMetadata struct {
 //        return newFileMetadata(uuid.New(), filePath, "")
 //}
 
-func New(filePath string, relativePath string) *FileMetadata {
+func NewFileMetadata(filePath string, relativePath string) *FileMetadata {
         return newFileMetadata(uuid.New().String(), filePath, relativePath)
 }
 
@@ -43,7 +43,7 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 
         f.fileName = fileInfo.Name()
         f.fileSize = fileInfo.Size()
-        f.chunks = list.New() // todo: implement chunk calculation
+        f.chunks = GetChunks(f.fileId, f.fileSize)
 
         return f
 }

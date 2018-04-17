@@ -18,7 +18,7 @@ func main() {
         discoService := nnet.NewDiscoveryService(0, 5)
         discoService.Start()
 
-        file := data.New("/home/markus/tmp/testo.txt", "")
+        file := data.NewFileMetadata("/home/markus/tmp/testo.txt", "")
         log.Println(file)
 
         wg.Wait()
