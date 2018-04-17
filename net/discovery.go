@@ -9,7 +9,7 @@ import (
 
 const MSG_SIZE = 36
 
-type service interface {
+type Service interface {
         Start()
         Stop()
 }
