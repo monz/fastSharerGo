@@ -4,6 +4,8 @@ import (
     "fmt"
     "sync"
     nnet "github.com/monz/fastSharerGo/net"
+    "github.com/monz/fastSharerGo/data"
+    "log"
 )
 
 
@@ -15,6 +17,9 @@ func main() {
 
         discoService := nnet.NewDiscoveryService(0, 5)
         discoService.Start()
+
+        file := data.New("/home/markus/tmp/testo.txt", "")
+        log.Println(file)
 
         wg.Wait()
 }
