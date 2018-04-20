@@ -4,6 +4,7 @@ import (
     "math"
     "container/list"
     "log"
+    "sync"
 )
 
 const CHUNK_SIZE = 1024*1024*64 // 64 MByte
@@ -15,6 +16,7 @@ type Chunk struct {
     fileId string
     isLocal bool
     downloadActive bool
+    mu sync.Mutex
 }
 
 func NewChunk(fileId string, offset int64, size int64) *Chunk {
@@ -40,7 +42,10 @@ func (c Chunk) SetLocal(isLocal bool) {
         c.isLocal = isLocal
 }
 
-func (c Chunk) ActivateDownload() bool {
+// use semaphores to make method atomic!!!
+func (c *Chunk) ActivateDownload() bool {
+        c.mu.Lock()
+        defer c.mu.Unlock()
         var success bool
         if c.downloadActive {
                 success = false
@@ -52,7 +57,10 @@ func (c Chunk) ActivateDownload() bool {
         return success
 }
 
-func (c Chunk) DeactivateDownload() bool {
+// use semaphores to make method atomic!!!
+func (c *Chunk) DeactivateDownload() bool {
+        c.mu.Lock()
+        defer c.mu.Unlock()
         var success bool
         if c.downloadActive {
                 c.downloadActive = false

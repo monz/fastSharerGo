@@ -88,3 +88,20 @@ func (f FileMetadata) HasChecksum() bool {
 func (f FileMetadata) RelativePath() string {
         return f.relativePath
 }
+
+func (f FileMetadata) AllChunksLocal() bool {
+        allChunksLocal := true
+        chunks := f.Chunks()
+        for e := chunks.Front(); e != nil; e = e.Next() {
+                value, ok := e.Value.(Chunk)
+                if !ok {
+                        log.Println("No chunk data!")
+                        continue
+                }
+                if !value.IsLocal() {
+                        allChunksLocal = false
+                        break
+                }
+        }
+        return allChunksLocal
+}
