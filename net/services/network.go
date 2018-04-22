@@ -1,117 +1,185 @@
 package net
 
 import (
-        "fmt"
-        "log"
-        "sync"
-        "time"
-        "net"
-        "github.com/monz/fastSharerGo/net/data"
-        "github.com/google/uuid"
+	"bufio"
+	"errors"
+	"fmt"
+	"github.com/google/uuid"
+	"github.com/monz/fastSharerGo/net/data"
+	"log"
+	"net"
+	"sync"
+	"time"
 )
 
 const (
-        socketTiemout = time.Second * 5
+	socketTiemout = time.Second * 5
 )
 
-type Network struct {
-        nodes map[uuid.UUID]*data.Node
-        cmdPort int
-        localNodeId uuid.UUID
-        mu sync.Mutex
+type NetworkService struct {
+	nodes       map[uuid.UUID]*data.Node
+	cmdPort     int
+	localNodeId uuid.UUID
+	subscriber  []data.ShareSubscriber
+	mu          sync.Mutex
 }
 
-func NewNetwork(cmdPort int) *Network {
-        n := new(Network)
-        n.nodes = make(map[uuid.UUID]*data.Node)
-        n.cmdPort = cmdPort
-        n.localNodeId = uuid.New()
+func NewNetworkService(cmdPort int) *NetworkService {
+	n := new(NetworkService)
+	n.nodes = make(map[uuid.UUID]*data.Node)
+	n.cmdPort = cmdPort
+	n.localNodeId = uuid.New()
 
-        return n
+	return n
 }
 
-func (n Network) SendCommand(cmd data.ShareCommand, node data.Node) {
-        // todo: implmenent
+func (n NetworkService) Subscribe(subscriber data.ShareSubscriber) {
+	n.subscriber = append(n.subscriber, subscriber)
 }
 
-func (n Network) AddNode(newNode data.Node) {
-        n.mu.Lock()
-        defer n.mu.Unlock()
-
-        node, ok := n.nodes[newNode.Id()]
-        if !ok {
-                node = &newNode
-                n.nodes[newNode.Id()] = node
-        }
-        node.SetLastTimeSeen(time.Now().UnixNano())
+func (n NetworkService) SendCommand(cmd data.ShareCommand, node data.Node) {
+	// todo: implmenent
 }
 
-func (n Network) RemoveNode(node data.Node) {
-        n.mu.Lock()
-        defer n.mu.Unlock()
+func (n NetworkService) AddNode(newNode data.Node) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-        // todo: implement, remove node from replica nodes
-        delete(n.nodes, node.Id())
+	node, ok := n.nodes[newNode.Id()]
+	if !ok {
+		node = &newNode
+		n.nodes[newNode.Id()] = node
+	}
+	node.SetLastTimeSeen(time.Now().UnixNano())
 }
 
-func (n Network) LocalNodeId() uuid.UUID {
-        return n.localNodeId
+func (n NetworkService) RemoveNode(node data.Node) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// todo: implement, remove node from replica nodes
+	delete(n.nodes, node.Id())
 }
 
-func (n Network) AllNodes() map[uuid.UUID]*data.Node {
-        return n.nodes
+func (n NetworkService) LocalNodeId() uuid.UUID {
+	return n.localNodeId
 }
 
-func (n Network) Node(nodeId uuid.UUID) (*data.Node, bool) {
-        node, ok := n.nodes[nodeId]
-        return node, ok
+func (n NetworkService) AllNodes() map[uuid.UUID]*data.Node {
+	return n.nodes
 }
 
-func (n Network) Start() {
-        go acceptConnections(n.cmdPort)
+func (n NetworkService) Node(nodeId uuid.UUID) (*data.Node, bool) {
+	node, ok := n.nodes[nodeId]
+	return node, ok
 }
 
-func (n Network) Stop() {
-        // todo: implement
+func (n NetworkService) Port() int {
+	return n.cmdPort
 }
 
-func acceptConnections(cmdPort int) {
-        cmdSocket, err := net.Listen("tcp", fmt.Sprintf(":%d", cmdPort))
-        if err != nil {
-                log.Fatal(err)
-        }
-        defer cmdSocket.Close()
-
-        for {
-                conn, err := cmdSocket.Accept()
-                if err != nil {
-                        log.Println(err)
-                        continue
-                }
-                go handleConnection(&conn)
-        }
+func (n NetworkService) Start() {
+	go n.acceptConnections()
 }
 
-func handleConnection(conn *net.Conn) {
-        for {
-            cmd, ok := readCommand(conn)
-            if !ok {
-                    log.Println("Could not read ShareCommand!")
-                    continue
-            }
-            switch cmd.Type() {
-            case data.DownloadRequestCmd:
-                    log.Println("Received download request")
-            case data.DownloadRequestResultCmd:
-                    log.Println("Received download request result")
-            case data.PushShareListCmd:
-                    log.Println("Received share list")
-            default:
-                    log.Println("Unknown command!")
-            }
-        }
+func (n NetworkService) Stop() {
+	// todo: implement
 }
 
-func readCommand(conn *net.Conn) (data.ShareCommand, bool) {
-    return nil, false
+func (n NetworkService) acceptConnections() {
+	cmdSocket, err := net.Listen("tcp", fmt.Sprintf(":%d", n.Port()))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cmdSocket.Close()
+
+	for {
+		conn, err := cmdSocket.Accept()
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		go n.handleConnection(conn)
+	}
+}
+
+func (n NetworkService) handleConnection(conn net.Conn) {
+	scanner := bufio.NewScanner(conn)
+	for {
+		cmd, err := readCommand(scanner)
+		if err != nil {
+			log.Println("Could not read ShareCommand!")
+			log.Println(err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		switch cmd.Type() {
+		case data.DownloadRequestCmd:
+			log.Println("Received download request")
+			n.updateDownloadRequest()
+			printCmd(*cmd)
+			// todo: implement
+		case data.DownloadRequestResultCmd:
+			log.Println("Received download request result")
+			n.updateDownloadRequestResult()
+			printCmd(*cmd)
+			// todo: implement
+		case data.PushShareListCmd:
+			log.Println("Received share list")
+			n.updatePushShareList()
+			printCmd(*cmd)
+			// todo: implement
+		default:
+			log.Println("Unknown command!")
+			time.Sleep(2 * time.Second) // only for debugging
+		}
+	}
+}
+
+func (n NetworkService) updateDownloadRequest() {
+	for _, s := range n.subscriber {
+		s.DownloadRequest()
+	}
+}
+
+func (n NetworkService) updateDownloadRequestResult() {
+	for _, s := range n.subscriber {
+		s.DownloadRequestResult()
+	}
+}
+
+func (n NetworkService) updatePushShareList() {
+	for _, s := range n.subscriber {
+		s.PushShareList()
+	}
+}
+
+// helper func to print command data elements
+func printCmd(cmd data.ShareCommand) {
+	for i := cmd.Data().Front(); i != nil; i = i.Next() {
+		log.Println(i.Value)
+	}
+}
+
+func readCommand(r *bufio.Scanner) (*data.ShareCommand, error) {
+	var line string
+
+	// maybe dont use scanner, just need []byte
+	if ok := r.Scan(); ok {
+		line = r.Text()
+		log.Println("Read line:", line)
+
+		cmd := data.NewShareCommand()
+		err := cmd.Deserialize([]byte(line))
+		if err != nil {
+			return nil, err
+		}
+		return cmd, nil
+
+	} else {
+		if err := r.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errors.New("Could not read command")
 }

@@ -1,20 +1,20 @@
 package data
 
 import (
-        "container/list"
-        "github.com/google/uuid"
-        "os"
-        "log"
+	"github.com/google/uuid"
+	"log"
+	"os"
 )
 
+// have to use exported members for JSON unmarshalling
 type FileMetadata struct {
-        fileId string
-        fileSize int64
-        checksum string
-        fileName string
-        chunks *list.List
-        relativePath string
-        filePath string
+	FileId           string  `json:"fileId"`
+	FileSize         int64   `json:"fileSize"`
+	FileChecksum     string  `json:"checksum"`
+	FileName         string  `json:"fileName"`
+	FileChunks       []Chunk `json:"chunks"`
+	FileRelativePath string  `json:"relativePath"`
+	FilePath         string  `json:"filePath"`
 }
 
 //func New(filePath string) *FileMetadata {
@@ -22,86 +22,80 @@ type FileMetadata struct {
 //}
 
 func NewFileMetadata(filePath string, relativePath string) *FileMetadata {
-        return newFileMetadata(uuid.New().String(), filePath, relativePath)
+	return newFileMetadata(uuid.New().String(), filePath, relativePath)
 }
 
 func newFileMetadata(fileId string, filePath string, relativePath string) *FileMetadata {
-        f := new(FileMetadata)
+	f := new(FileMetadata)
 
-        f.fileId = fileId
-        f.filePath = filePath
-        f.relativePath = relativePath
+	f.FileId = fileId
+	f.FilePath = filePath
+	f.FileRelativePath = relativePath
 
-        file, err := os.Open(filePath)
-        if err != nil {
-                log.Fatal(err)
-        }
-        fileInfo, err := file.Stat()
-        if err != nil {
-                log.Fatal(err)
-        }
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fileInfo, err := file.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-        f.fileName = fileInfo.Name()
-        f.fileSize = fileInfo.Size()
-        f.chunks = GetChunks(f.fileId, f.fileSize)
+	f.FileName = fileInfo.Name()
+	f.FileSize = fileInfo.Size()
+	f.FileChunks = GetChunks(f.FileId, f.FileSize)
 
-        return f
+	return f
 }
 
-func (f FileMetadata) Chunks() *list.List {
-        return f.chunks
+func (f FileMetadata) Chunks() []Chunk {
+	return f.FileChunks
 }
 
 func (f FileMetadata) IsChunkLocal(checksum string) bool {
-        // todo: implement
-        return false
+	// todo: implement
+	return false
 }
 
 func (f FileMetadata) Checksum() string {
-        return f.checksum
+	return f.FileChecksum
 }
 
 func (f FileMetadata) SetChecksum(checksum string) {
-        f.checksum = checksum
+	f.FileChecksum = checksum
 }
 
-func (f FileMetadata) FilePath() string {
-        return f.filePath
+func (f FileMetadata) Path() string {
+	return f.FilePath
 }
 
 func (f FileMetadata) SetFilePath(filePath string) {
-        f.filePath = filePath
+	f.FilePath = filePath
 }
 
-func (f FileMetadata) FileSize() int64 {
-        return f.fileSize
+func (f FileMetadata) Size() int64 {
+	return f.FileSize
 }
 
-func (f FileMetadata) FileId() string {
-        return f.fileId
+func (f FileMetadata) Id() string {
+	return f.FileId
 }
 
 func (f FileMetadata) HasChecksum() bool {
-        return len(f.checksum) > 0
+	return len(f.FileChecksum) > 0
 }
 
 func (f FileMetadata) RelativePath() string {
-        return f.relativePath
+	return f.FileRelativePath
 }
 
 func (f FileMetadata) AllChunksLocal() bool {
-        allChunksLocal := true
-        chunks := f.Chunks()
-        for e := chunks.Front(); e != nil; e = e.Next() {
-                value, ok := e.Value.(Chunk)
-                if !ok {
-                        log.Println("No chunk data!")
-                        continue
-                }
-                if !value.IsLocal() {
-                        allChunksLocal = false
-                        break
-                }
-        }
-        return allChunksLocal
+	allChunksLocal := true
+	for _, c := range f.FileChunks {
+		if !c.IsLocal() {
+			allChunksLocal = false
+			break
+		}
+	}
+	return allChunksLocal
 }

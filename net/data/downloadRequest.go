@@ -1,28 +1,28 @@
 package data
 
 type DownloadRequest struct {
-        fileId string
-        nodeId string
-        chunkChecksum string
+	RequestFileId        string `json:"fileId"`
+	RequestNodeId        string `json:"nodeId"`
+	RequestChunkChecksum string `json:"chunkChecksum"`
 }
 
 func NewDownloadRequest(fileId string, nodeId string, chunkChecksum string) *DownloadRequest {
-        request := new(DownloadRequest)
-        request.fileId = fileId
-        request.nodeId = nodeId
-        request.chunkChecksum = chunkChecksum
+	request := new(DownloadRequest)
+	request.RequestFileId = fileId
+	request.RequestNodeId = nodeId
+	request.RequestChunkChecksum = chunkChecksum
 
-        return request
+	return request
 }
 
 func (r DownloadRequest) FileId() string {
-        return r.fileId
+	return r.RequestFileId
 }
 
 func (r DownloadRequest) NodeId() string {
-        return r.nodeId
+	return r.RequestNodeId
 }
 
 func (r DownloadRequest) ChunkChecksum() string {
-        return r.chunkChecksum
+	return r.RequestChunkChecksum
 }

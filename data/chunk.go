@@ -1,132 +1,132 @@
 package data
 
 import (
-    "math"
-    "container/list"
-    "log"
-    "sync"
+	"log"
+	"math"
+	"sync"
 )
 
-const CHUNK_SIZE = 1024*1024*64 // 64 MByte
+const CHUNK_SIZE = 1024 * 1024 * 64 // 64 MByte
 
 type Chunk struct {
-    checksum string
-    offset int64
-    size int64
-    fileId string
-    isLocal bool
-    downloadActive bool
-    mu sync.Mutex
+	ChunkChecksum  string `json:"checksum"`
+	ChunkOffset    int64  `json:"offset"`
+	ChunkSize      int64  `json:"size"`
+	fileId         string
+	isLocal        bool
+	downloadActive bool
+	mu             sync.Mutex
 }
 
 func NewChunk(fileId string, offset int64, size int64) *Chunk {
-    c := new(Chunk)
-    c.fileId = fileId
-    c.offset = offset
-    c.size = size
-    c.isLocal = true;
-    c.downloadActive = false;
+	c := new(Chunk)
+	c.fileId = fileId
+	c.ChunkOffset = offset
+	c.ChunkSize = size
+	c.isLocal = true
+	c.downloadActive = false
 
-    return c
+	return c
 }
 
 func (c Chunk) FileId() string {
-        return c.fileId
+	return c.fileId
 }
 
 func (c Chunk) SetFileId(fileId string) {
-        c.fileId = fileId
+	c.fileId = fileId
 }
 
 func (c Chunk) SetLocal(isLocal bool) {
-        c.isLocal = isLocal
+	c.isLocal = isLocal
 }
 
 // use semaphores to make method atomic!!!
 func (c *Chunk) ActivateDownload() bool {
-        c.mu.Lock()
-        defer c.mu.Unlock()
-        var success bool
-        if c.downloadActive {
-                success = false
-        } else {
-                c.downloadActive = true
-                success = true
-                // waitSince = System.currentTimeMillis();
-        }
-        return success
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var success bool
+	if c.downloadActive {
+		success = false
+	} else {
+		c.downloadActive = true
+		success = true
+		// waitSince = System.currentTimeMillis();
+	}
+	return success
 }
 
 // use semaphores to make method atomic!!!
 func (c *Chunk) DeactivateDownload() bool {
-        c.mu.Lock()
-        defer c.mu.Unlock()
-        var success bool
-        if c.downloadActive {
-                c.downloadActive = false
-                success = true
-                // waitSince = -1
-        } else {
-                success = false
-        }
-        return success
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var success bool
+	if c.downloadActive {
+		c.downloadActive = false
+		success = true
+		// waitSince = -1
+	} else {
+		success = false
+	}
+	return success
 }
 
 func (c Chunk) IsDownloadActive() bool {
-        return c.downloadActive
+	return c.downloadActive
 }
 
 func (c Chunk) IsLocal() bool {
-        return c.isLocal
+	return c.isLocal
 }
 
 func (c Chunk) Checksum() string {
-        return c.checksum
+	return c.ChunkChecksum
 }
 
 func (c Chunk) SetChecksum(checksum string) {
-        c.checksum = checksum
+	c.ChunkChecksum = checksum
 }
 
 func (c Chunk) Offset() int64 {
-        return c.offset
+	return c.ChunkOffset
 }
 
 func (c Chunk) Size() int64 {
-        return c.size
+	return c.ChunkSize
 }
 
 func (c Chunk) Equals(c2 Chunk) bool {
-        return c.checksum == c2.Checksum()
+	return c.ChunkChecksum == c2.Checksum()
 }
 
 func (c Chunk) HasChecksum() bool {
-        return len(c.checksum) > 0
+	return len(c.ChunkChecksum) > 0
 }
 
 func (c Chunk) RequestAnswered() {
-        // todo: implement
-        log.Println("requestAnswered is not implemented!")
-        // waitSince = -1
+	// todo: implement
+	log.Println("requestAnswered is not implemented!")
+	// waitSince = -1
 }
 
 func GetChunkCount(fileSize int64) int {
-        return int(math.Ceil(float64(fileSize) / CHUNK_SIZE))
+	return int(math.Ceil(float64(fileSize) / CHUNK_SIZE))
 }
 
-func GetChunks(fileId string, fileSize int64) *list.List {
-        chunks := list.New()
+func GetChunks(fileId string, fileSize int64) []Chunk {
+	var chunks []Chunk
 
-        remainingSize := fileSize
-        size := int64(math.Min(CHUNK_SIZE, float64(remainingSize)))
-        for size > 0 {
-                offset := fileSize - remainingSize
-                chunks.PushBack(NewChunk(fileId, offset, size))
-                remainingSize -= int64(size)
-                size = CHUNK_SIZE
-                if (remainingSize - CHUNK_SIZE) < 0 {
-                        size = int64(remainingSize)
-                }
-        }
-        return chunks
+	remainingSize := fileSize
+	size := int64(math.Min(CHUNK_SIZE, float64(remainingSize)))
+	for size > 0 {
+		offset := fileSize - remainingSize
+		chunk := NewChunk(fileId, offset, size)
+		chunks = append(chunks, *chunk)
+		remainingSize -= int64(size)
+		size = CHUNK_SIZE
+		if (remainingSize - CHUNK_SIZE) < 0 {
+			size = int64(remainingSize)
+		}
+	}
+	return chunks
 }

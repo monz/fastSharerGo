@@ -1,28 +1,35 @@
 package main
 
 import (
-    "fmt"
-    "sync"
-    nnet "github.com/monz/fastSharerGo/net/services"
-    "github.com/monz/fastSharerGo/data"
-    "log"
+	"fmt"
+	"github.com/monz/fastSharerGo/data"
+	nnet "github.com/monz/fastSharerGo/net/services"
+	"log"
+	"sync"
 )
 
-
 func main() {
-        fmt.Println("Starting fastSharer...")
+	fmt.Println("Starting fastSharer...")
 
-        // start services
-        discoService := nnet.NewDiscoveryService(0, 5)
-        discoService.Start()
+	// start services
+	discoService := nnet.NewDiscoveryService(0, 5)
+	discoService.Start()
 
-        file := data.NewFileMetadata("/home/markus/tmp/testo.txt", "")
-        log.Println(file)
+	netService := nnet.NewNetworkService(6132)
+	netService.Start()
 
-        // future: open 'shell' to handle sharer control commands from command line
-        // intermediate solution, blocking call
-        var wg sync.WaitGroup
-        wg.Add(1)
+	//shareService := nnet.ShareService()
+	//shareService.Start()
+	// subscribe to share message updates from network service
+	//netService.Subscribe(shareService)
 
-        wg.Wait()
+	file := data.NewFileMetadata("/home/markus/tmp/testo.txt", "")
+	log.Println(file)
+
+	// future: open 'shell' to handle sharer control commands from command line
+	// intermediate solution, blocking call
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	wg.Wait()
 }
