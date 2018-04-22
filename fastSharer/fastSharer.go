@@ -18,10 +18,10 @@ func main() {
 	netService := nnet.NewNetworkService(6132)
 	netService.Start()
 
-	//shareService := nnet.ShareService()
-	//shareService.Start()
+	shareService := nnet.NewShareService()
+	shareService.Start()
 	// subscribe to share message updates from network service
-	//netService.Subscribe(shareService)
+	netService.Subscribe(shareService)
 
 	file := data.NewFileMetadata("/home/markus/tmp/testo.txt", "")
 	log.Println(file)

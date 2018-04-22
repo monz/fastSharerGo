@@ -33,7 +33,7 @@ func NewNetworkService(cmdPort int) *NetworkService {
 	return n
 }
 
-func (n NetworkService) Subscribe(subscriber data.ShareSubscriber) {
+func (n *NetworkService) Subscribe(subscriber data.ShareSubscriber) {
 	n.subscriber = append(n.subscriber, subscriber)
 }
 
@@ -78,7 +78,7 @@ func (n NetworkService) Port() int {
 	return n.cmdPort
 }
 
-func (n NetworkService) Start() {
+func (n *NetworkService) Start() {
 	go n.acceptConnections()
 }
 
@@ -86,7 +86,7 @@ func (n NetworkService) Stop() {
 	// todo: implement
 }
 
-func (n NetworkService) acceptConnections() {
+func (n *NetworkService) acceptConnections() {
 	cmdSocket, err := net.Listen("tcp", fmt.Sprintf(":%d", n.Port()))
 	if err != nil {
 		log.Fatal(err)
@@ -103,7 +103,7 @@ func (n NetworkService) acceptConnections() {
 	}
 }
 
-func (n NetworkService) handleConnection(conn net.Conn) {
+func (n *NetworkService) handleConnection(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for {
 		cmd, err := readCommand(scanner)
@@ -137,18 +137,21 @@ func (n NetworkService) handleConnection(conn net.Conn) {
 }
 
 func (n NetworkService) updateDownloadRequest() {
+	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
 		s.DownloadRequest()
 	}
 }
 
 func (n NetworkService) updateDownloadRequestResult() {
+	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
 		s.DownloadRequestResult()
 	}
 }
 
 func (n NetworkService) updatePushShareList() {
+	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
 		s.PushShareList()
 	}
