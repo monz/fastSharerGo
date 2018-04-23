@@ -16,12 +16,12 @@ func main() {
 	netService := nnet.NewNetworkService(6132)
 	netService.Start()
 	// subscribe to node message updates from discovery service
-	discoService.Subscribe(netService)
+	discoService.Register(netService)
 
-	shareService := nnet.NewShareService()
+	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), 5, 5)
 	shareService.Start()
 	// subscribe to share message updates from network service
-	netService.Subscribe(shareService)
+	netService.Register(shareService)
 
 	// future: open 'shell' to handle sharer control commands from command line
 	// intermediate solution, blocking call

@@ -40,7 +40,7 @@ func NewDiscoveryService(initDelay time.Duration, period time.Duration) *Discove
 	return d
 }
 
-func (d *DiscoveryService) Subscribe(subscriber data.NodeSubscriber) {
+func (d *DiscoveryService) Register(subscriber data.NodeSubscriber) {
 	d.subscriber = append(d.subscriber, subscriber)
 }
 

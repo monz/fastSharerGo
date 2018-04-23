@@ -57,7 +57,7 @@ func (sf SharedFile) ReplicaNodes() map[uuid.UUID]ReplicaNode {
 }
 
 // use semaphores to make method atomic!!!
-func (sf *SharedFile) activateDownload() bool {
+func (sf *SharedFile) ActivateDownload() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	var success bool
@@ -71,7 +71,7 @@ func (sf *SharedFile) activateDownload() bool {
 }
 
 // use semaphores to make method atomic!!!
-func (sf *SharedFile) deactivateDownload() bool {
+func (sf *SharedFile) DeactivateDownload() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	var success bool
@@ -82,4 +82,37 @@ func (sf *SharedFile) deactivateDownload() bool {
 		success = false
 	}
 	return success
+}
+
+func (sf *SharedFile) IsDownloadActive() bool {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.downloadActive
+}
+
+func (sf *SharedFile) ChunksToDownload() []data.Chunk {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	var chunks []data.Chunk
+	if len(sf.FileMetadata.Chunks()) > 0 && !sf.IsLocal() {
+		for _, c := range sf.FileMetadata.Chunks() {
+			if !c.IsLocal() && !c.IsDownloadActive() && len(c.Checksum()) > 0 {
+				chunks = append(chunks, c)
+			}
+		}
+	}
+
+	return chunks
+}
+
+func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
+	var replicaNodes []ReplicaNode
+	for _, replicaNode := range sf.FileReplicaNodes {
+		if replicaNode.Contains(chunkChecksum) {
+			replicaNodes = append(replicaNodes, replicaNode)
+		}
+	}
+
+	return replicaNodes
 }

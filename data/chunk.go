@@ -71,7 +71,9 @@ func (c *Chunk) DeactivateDownload() bool {
 	return success
 }
 
-func (c Chunk) IsDownloadActive() bool {
+func (c *Chunk) IsDownloadActive() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.downloadActive
 }
 

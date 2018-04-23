@@ -1,7 +1,7 @@
 package data
 
 type ShareSubscriber interface {
-	DownloadRequest()
-	DownloadRequestResult()
-	PushShareList()
+	ReceivedDownloadRequest()
+	ReceivedDownloadRequestResult()
+	ReceivedShareList(sf SharedFile)
 }

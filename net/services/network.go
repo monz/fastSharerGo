@@ -2,6 +2,7 @@ package net
 
 import (
 	"bufio"
+	"container/list"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ type NetworkService struct {
 	cmdPort     int
 	localNodeId uuid.UUID
 	subscriber  []data.ShareSubscriber
+	sender      chan data.ShareCommand
 	mu          sync.Mutex
 }
 
@@ -29,11 +31,12 @@ func NewNetworkService(cmdPort int) *NetworkService {
 	n.nodes = make(map[uuid.UUID]*data.Node)
 	n.cmdPort = cmdPort
 	n.localNodeId = uuid.New()
+	n.sender = make(chan data.ShareCommand)
 
 	return n
 }
 
-func (n *NetworkService) Subscribe(subscriber data.ShareSubscriber) {
+func (n *NetworkService) Register(subscriber data.ShareSubscriber) {
 	n.subscriber = append(n.subscriber, subscriber)
 }
 
@@ -57,8 +60,23 @@ func (n *NetworkService) RemoveNode(node data.Node) {
 	delete(n.nodes, node.Id())
 }
 
-func (n NetworkService) SendCommand(cmd data.ShareCommand, node data.Node) {
+func (n *NetworkService) Sender() chan data.ShareCommand {
+	return n.sender
+}
+
+func (n NetworkService) sendCommand(cmd data.ShareCommand) {
 	// todo: implmenent
+	log.Println("Send command:", cmd.Type())
+}
+
+func (n *NetworkService) send() {
+	// get share command, is blocking
+	for {
+		log.Println("Ready for receiving messages to send")
+		cmd := <-n.sender
+		log.Println("Received message to send, sending...")
+		go n.sendCommand(cmd)
+	}
 }
 
 func (n NetworkService) LocalNodeId() uuid.UUID {
@@ -80,6 +98,7 @@ func (n NetworkService) Port() int {
 
 func (n *NetworkService) Start() {
 	go n.acceptConnections()
+	go n.send()
 }
 
 func (n NetworkService) Stop() {
@@ -115,18 +134,18 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 		}
 		switch cmd.Type() {
 		case data.DownloadRequestCmd:
-			log.Println("Received download request")
-			n.updateDownloadRequest()
+			log.Println("Received download request from other client")
+			n.receivedDownloadRequest()
 			printCmd(*cmd)
 			// todo: implement
 		case data.DownloadRequestResultCmd:
-			log.Println("Received download request result")
-			n.updateDownloadRequestResult()
+			log.Println("Received download request result from other client")
+			n.receivedDownloadRequestResult()
 			printCmd(*cmd)
 			// todo: implement
 		case data.PushShareListCmd:
-			log.Println("Received share list")
-			n.updatePushShareList()
+			log.Println("Received share list from other client")
+			n.receivedShareList(cmd.Data())
 			printCmd(*cmd)
 			// todo: implement
 		default:
@@ -136,24 +155,27 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 	}
 }
 
-func (n NetworkService) updateDownloadRequest() {
+func (n NetworkService) receivedDownloadRequest() {
 	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
-		s.DownloadRequest()
+		s.ReceivedDownloadRequest()
 	}
 }
 
-func (n NetworkService) updateDownloadRequestResult() {
+func (n NetworkService) receivedDownloadRequestResult() {
 	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
-		s.DownloadRequestResult()
+		s.ReceivedDownloadRequestResult()
 	}
 }
 
-func (n NetworkService) updatePushShareList() {
+func (n NetworkService) receivedShareList(l *list.List) {
 	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
-		s.PushShareList()
+		// update subscriber for all data list entries
+		for i := l.Front(); i != nil; i = i.Next() {
+			s.ReceivedShareList(i.Value.(data.SharedFile))
+		}
 	}
 }
 
@@ -172,8 +194,8 @@ func readCommand(r *bufio.Scanner) (*data.ShareCommand, error) {
 		line = r.Text()
 		log.Println("Read line:", line)
 
-		cmd := data.NewShareCommand()
-		err := cmd.Deserialize([]byte(line))
+		cmd := data.NewEmptyShareCommand()
+		err := data.DeserializeShareCommand([]byte(line), cmd)
 		if err != nil {
 			return nil, err
 		}

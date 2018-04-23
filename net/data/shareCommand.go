@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"log"
 )
 
@@ -50,7 +51,6 @@ func (c *Cmd) ParseString(cmd string) error {
 		err = errors.New("Could not parse command")
 	}
 	return err
-
 }
 
 func (c *Cmd) UnmarshalJSON(b []byte) error {
@@ -63,13 +63,23 @@ func (c *Cmd) UnmarshalJSON(b []byte) error {
 }
 
 type ShareCommand struct {
-	cmdType Cmd
-	data    *list.List
+	cmdType     Cmd
+	data        *list.List
+	destination uuid.UUID
 }
 
-func NewShareCommand() *ShareCommand {
+func NewEmptyShareCommand() *ShareCommand {
 	cmd := new(ShareCommand)
 	cmd.data = list.New()
+
+	return cmd
+}
+
+func NewShareCommand(cmdType Cmd, data *list.List, destination uuid.UUID) *ShareCommand {
+	cmd := new(ShareCommand)
+	cmd.cmdType = cmdType
+	cmd.data = data
+	cmd.destination = destination
 
 	return cmd
 }
@@ -82,11 +92,13 @@ func (c ShareCommand) Data() *list.List {
 	return c.data
 }
 
-func (c ShareCommand) Serialize() {
-
+func SerializeShareCommand(c ShareCommand) []byte {
+	// todo: implement
+	var b []byte
+	return b
 }
 
-func (c *ShareCommand) Deserialize(b []byte) error {
+func DeserializeShareCommand(b []byte, c *ShareCommand) error {
 	// get first json layer
 	var objMap map[string]*json.RawMessage
 	err := json.Unmarshal(b, &objMap)
