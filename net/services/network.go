@@ -37,28 +37,28 @@ func (n *NetworkService) Subscribe(subscriber data.ShareSubscriber) {
 	n.subscriber = append(n.subscriber, subscriber)
 }
 
-func (n NetworkService) SendCommand(cmd data.ShareCommand, node data.Node) {
-	// todo: implmenent
-}
-
-func (n NetworkService) AddNode(newNode data.Node) {
+func (n *NetworkService) AddNode(newNode data.Node) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	node, ok := n.nodes[newNode.Id()]
 	if !ok {
 		node = &newNode
-		n.nodes[newNode.Id()] = node
+		n.nodes[newNode.Id()] = &newNode
 	}
 	node.SetLastTimeSeen(time.Now().UnixNano())
 }
 
-func (n NetworkService) RemoveNode(node data.Node) {
+func (n *NetworkService) RemoveNode(node data.Node) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	// todo: implement, remove node from replica nodes
 	delete(n.nodes, node.Id())
+}
+
+func (n NetworkService) SendCommand(cmd data.ShareCommand, node data.Node) {
+	// todo: implmenent
 }
 
 func (n NetworkService) LocalNodeId() uuid.UUID {

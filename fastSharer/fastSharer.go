@@ -2,9 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/monz/fastSharerGo/data"
 	nnet "github.com/monz/fastSharerGo/net/services"
-	"log"
 	"sync"
 )
 
@@ -17,14 +15,13 @@ func main() {
 
 	netService := nnet.NewNetworkService(6132)
 	netService.Start()
+	// subscribe to node message updates from discovery service
+	discoService.Subscribe(netService)
 
 	shareService := nnet.NewShareService()
 	shareService.Start()
 	// subscribe to share message updates from network service
 	netService.Subscribe(shareService)
-
-	file := data.NewFileMetadata("/home/markus/tmp/testo.txt", "")
-	log.Println(file)
 
 	// future: open 'shell' to handle sharer control commands from command line
 	// intermediate solution, blocking call
