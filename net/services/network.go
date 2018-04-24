@@ -25,11 +25,11 @@ type NetworkService struct {
 	mu          sync.Mutex
 }
 
-func NewNetworkService(cmdPort int) *NetworkService {
+func NewNetworkService(localId uuid.UUID, cmdPort int) *NetworkService {
 	n := new(NetworkService)
 	n.nodes = make(map[uuid.UUID]*data.Node)
 	n.cmdPort = cmdPort
-	n.localNodeId = uuid.New()
+	n.localNodeId = localId
 	n.sender = make(chan data.ShareCommand)
 
 	return n

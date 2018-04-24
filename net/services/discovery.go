@@ -11,12 +11,12 @@ import (
 const MSG_SIZE = 36
 
 type DiscoveryService struct {
-	uuid       uuid.UUID
-	c          *net.UDPConn
-	initDelay  time.Duration
-	period     time.Duration
-	localIps   map[string]bool
-	subscriber []data.NodeSubscriber
+	localNodeId uuid.UUID
+	c           *net.UDPConn
+	initDelay   time.Duration
+	period      time.Duration
+	localIps    map[string]bool
+	subscriber  []data.NodeSubscriber
 }
 
 func NewDiscoveryService(initDelay time.Duration, period time.Duration) *DiscoveryService {
@@ -34,10 +34,14 @@ func NewDiscoveryService(initDelay time.Duration, period time.Duration) *Discove
 	}
 
 	// generate unique node id (UUID)
-	d.uuid = uuid.New()
+	d.localNodeId = uuid.New()
 	d.localIps = extractLocalAdresses()
 
 	return d
+}
+
+func (d DiscoveryService) LocalNodeId() uuid.UUID {
+	return d.localNodeId
 }
 
 func (d *DiscoveryService) Register(subscriber data.NodeSubscriber) {
@@ -146,7 +150,7 @@ func (d DiscoveryService) send() {
 	}
 
 	// convert uuid to []byte
-	buf, err := d.uuid.MarshalText()
+	buf, err := d.localNodeId.MarshalText()
 	if err != nil {
 		log.Fatal(err)
 	}

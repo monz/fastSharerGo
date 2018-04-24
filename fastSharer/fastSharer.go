@@ -13,7 +13,7 @@ func main() {
 	discoService := nnet.NewDiscoveryService(0, 5)
 	discoService.Start()
 
-	netService := nnet.NewNetworkService(6132)
+	netService := nnet.NewNetworkService(discoService.LocalNodeId(), 6132)
 	netService.Start()
 	// subscribe to node message updates from discovery service
 	discoService.Register(netService)
