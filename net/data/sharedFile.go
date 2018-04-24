@@ -116,3 +116,7 @@ func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
 
 	return replicaNodes
 }
+
+func (sf SharedFile) ChunkById(chunkChecksum string) (*data.Chunk, error) {
+	return sf.FileMetadata.ChunkById(chunkChecksum)
+}

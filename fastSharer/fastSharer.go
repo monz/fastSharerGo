@@ -22,6 +22,8 @@ func main() {
 	shareService.Start()
 	// subscribe to share message updates from network service
 	netService.Register(shareService)
+	// subscribe to node message updates from dicovery service
+	discoService.Register(shareService)
 
 	// future: open 'shell' to handle sharer control commands from command line
 	// intermediate solution, blocking call

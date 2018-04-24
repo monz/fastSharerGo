@@ -2,6 +2,6 @@ package data
 
 type ShareSubscriber interface {
 	ReceivedDownloadRequest()
-	ReceivedDownloadRequestResult()
+	ReceivedDownloadRequestResult(rr DownloadRequestResult)
 	ReceivedShareList(sf SharedFile)
 }

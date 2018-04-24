@@ -177,7 +177,7 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 			// todo: implement
 		case data.DownloadRequestResultCmd:
 			log.Println("Received download request result from other client")
-			n.receivedDownloadRequestResult()
+			n.receivedDownloadRequestResult(cmd.Data())
 			printCmd(*cmd)
 			// todo: implement
 		case data.PushShareListCmd:
@@ -199,10 +199,12 @@ func (n NetworkService) receivedDownloadRequest() {
 	}
 }
 
-func (n NetworkService) receivedDownloadRequestResult() {
+func (n NetworkService) receivedDownloadRequestResult(l []interface{}) {
 	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
-		s.ReceivedDownloadRequestResult()
+		for _, v := range l {
+			s.ReceivedDownloadRequestResult(v.(data.DownloadRequestResult))
+		}
 	}
 }
 

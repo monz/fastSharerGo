@@ -1,23 +1,37 @@
 package net
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/md5"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
 	localData "github.com/monz/fastSharerGo/data"
 	"github.com/monz/fastSharerGo/net/data"
+	"io"
 	"log"
 	"math"
 	"math/rand"
+	"net"
 	"os"
+	"path"
 	"sync"
 	"time"
 )
 
+const (
+	// already defined in network service
+	//socketTimeout = 10 * time.Second
+	bufferSize = 4096
+)
+
 type ShareService struct {
 	localNodeId  uuid.UUID
+	nodes        map[uuid.UUID]*data.Node
 	maxUploads   chan int
 	maxDownloads chan int
-	sharedFiles  []data.SharedFile
+	sharedFiles  map[string]data.SharedFile
 	sender       chan data.ShareCommand
 	mu           sync.Mutex
 }
@@ -25,8 +39,10 @@ type ShareService struct {
 func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, maxUploads int, maxDownloads int) *ShareService {
 	s := new(ShareService)
 	s.localNodeId = localNodeId
+	s.nodes = make(map[uuid.UUID]*data.Node)
 	s.maxUploads = initSema(maxUploads)
 	s.maxDownloads = initSema(maxDownloads)
+	s.sharedFiles = make(map[string]data.SharedFile)
 	s.sender = sender
 	// init random
 	rand.Seed(time.Now().UnixNano())
@@ -48,14 +64,140 @@ func (s ShareService) Start() {
 func (s ShareService) Stop() {
 }
 
+// implement shareSubscriber interface
 func (s ShareService) ReceivedDownloadRequest() {
 	log.Println("Added download request from other client")
 }
 
-func (s ShareService) ReceivedDownloadRequestResult() {
+// implement shareSubscriber interface
+func (s *ShareService) ReceivedDownloadRequestResult(requestResult data.DownloadRequestResult) {
 	log.Println("Added answer to our download request")
+	go s.download(requestResult)
 }
 
+func (s *ShareService) download(rr data.DownloadRequestResult) {
+	sf, ok := s.sharedFiles[rr.FileId()]
+	if !ok {
+		log.Println("Could not find shared file")
+		s.downloadFail(nil)
+		return
+	}
+	chunk, err := sf.ChunkById(rr.ChunkChecksum())
+	if err != nil {
+		log.Println(err)
+		s.downloadFail(nil)
+		return
+	}
+	// check if download was accepted
+	if rr.DownloadPort() < 0 {
+		log.Printf("Download request of chunk '%s' was not accepted\n", rr.ChunkChecksum())
+		s.downloadFail(chunk)
+		return
+	}
+
+	log.Printf("Downloading for file '%s', chunk '%s'\n", rr.FileId(), rr.ChunkChecksum())
+	id, err := uuid.Parse(rr.NodeId())
+	if err != nil {
+		log.Println(err)
+		s.downloadFail(chunk)
+		return
+	}
+	node, ok := s.nodes[id]
+	if !ok {
+		log.Println("Download failed, node not found")
+	}
+
+	// connect to uploading client
+	var tcpConn *net.TCPConn
+	defer tcpConn.Close()
+	for _, ip := range node.Ips() {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf(ip, rr.DownloadPort()), socketTimeout)
+		tcpConn = conn.(*net.TCPConn)
+		if err != nil {
+			log.Println(err)
+			s.downloadFail(chunk)
+			return
+		}
+		break
+	}
+
+	// download chunk
+	checksum, err := s.receiveData(tcpConn, sf.FilePath(), chunk)
+	if err != nil {
+		log.Println(err)
+		s.downloadFail(chunk)
+	} else if checksum != rr.ChunkChecksum() {
+		log.Println("Checksum of downloaded chunk does not match!")
+		s.downloadFail(chunk)
+	} else {
+		s.downloadSuccess(sf, chunk)
+	}
+}
+
+func (s *ShareService) downloadFail(chunk *localData.Chunk) {
+	// todo: implement
+}
+
+func (s *ShareService) downloadSuccess(sf data.SharedFile, chunk *localData.Chunk) {
+	// todo: implement
+}
+
+func (s *ShareService) receiveData(conn *net.TCPConn, filePath string, chunk *localData.Chunk) (checksum string, err error) {
+	// create directory structure
+	path := path.Dir(filePath)
+	err = os.MkdirAll(path, os.ModeDir)
+	if err != nil {
+		return checksum, err
+	}
+
+	// write data to file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return checksum, err
+	}
+
+	// advance read pointer to offset
+	if chunk.Offset() > 0 {
+		_, err = file.Seek(chunk.Offset(), 0)
+		if err != nil {
+			return checksum, err
+		}
+	}
+
+	// prepare message digest
+	hash := md5.New()
+
+	// simultaneously download, write to file, calculate checksum
+	remainingBytes := chunk.Size()
+	buf := make([]byte, bufferSize)
+	bufReader := bytes.NewReader(buf)
+	reader := bufio.NewReader(conn)
+	n, err := reader.Read(buf)
+	if err != nil {
+		return checksum, err
+	}
+	multiWriter := io.MultiWriter(file, hash)
+	for n > 0 && err != io.EOF {
+		if (remainingBytes - int64(n)) > 0 {
+			_, err = io.Copy(multiWriter, bufReader)
+			if err != nil {
+				return checksum, err
+			}
+			//file.Write(buf, 0, n)
+			remainingBytes -= int64(n)
+			n, err = reader.Read(buf)
+		} else {
+			_, err = io.CopyN(multiWriter, bufReader, int64(remainingBytes))
+			//file.Write(buf, 0, remainingBytes)
+			break
+		}
+	}
+	file.Close()
+
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// implement shareSubscriber interface
 func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 	log.Println("Added shared file from other client")
 
@@ -227,4 +369,23 @@ func fileComplete(filePath string) bool {
 func enoughSpace(filePath string) bool {
 	// todo: implement
 	return true
+}
+
+// implement nodeSubscriber interface
+func (s *ShareService) AddNode(newNode data.Node) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, ok := s.nodes[newNode.Id()]
+	if !ok {
+		s.nodes[newNode.Id()] = &newNode
+	}
+}
+
+// implement nodeSubscriber interface
+func (s *ShareService) RemoveNode(node data.Node) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.nodes, node.Id())
 }
