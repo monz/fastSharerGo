@@ -97,11 +97,11 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 	}
 
 	// activate download
-	go s.requestDownload(sf, 0)
+	go s.requestDownload(&sf, 0)
 }
 
-func (s *ShareService) requestDownload(sf data.SharedFile, initialDelay time.Duration) {
-	log.Println("Request download")
+func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Duration) {
+	log.Printf("Request download for sharedFile %p\n", sf)
 	// delay download request
 	time.Sleep(initialDelay * time.Millisecond)
 
@@ -113,9 +113,10 @@ func (s *ShareService) requestDownload(sf data.SharedFile, initialDelay time.Dur
 	log.Println("Could aquire download token")
 
 	// get list of all chunks still to download
-	chunks := sf.ChunksToDownload()
-	for len(chunks) > 0 {
-		log.Println("Remaining chunks to download:", len(chunks))
+	chunkCount := len(sf.ChunksToDownload())
+	for chunkCount > 0 {
+		log.Printf("Remaining chunks to download: %d, for file %p\n", chunkCount, sf)
+		time.Sleep(5 * time.Second)
 		//select node to download from
 		nodeId, chunk, err := s.nextDownloadInformation(sf)
 		if err != nil {
@@ -138,27 +139,25 @@ func (s *ShareService) requestDownload(sf data.SharedFile, initialDelay time.Dur
 		request := list.New()
 		request.PushBack(data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum()))
 		cmd := data.NewShareCommand(data.DownloadRequestCmd, request, nodeId)
-		log.Println("Before sending command:", *cmd)
 		s.sender <- *cmd
-		log.Println("After sending command!")
 
 		// check wether new chunk information arrived
-		chunks = sf.ChunksToDownload()
+		chunkCount = len(sf.ChunksToDownload())
 	}
 	// no more download information, check whether file is completely downloaded
-	if len(chunks) <= 0 && !sf.IsLocal() {
+	if chunkCount <= 0 && !sf.IsLocal() {
 		log.Println("No chunks to download, but files is not local yet, waiting for more information!")
 		// reschedule download job
 		log.Println("Reschedule download job")
-		go s.requestDownload(sf, 500)
+		go s.requestDownload(sf, 1500) // todo: reduce time to 500ms
 		return
-	} else if len(chunks) <= 0 && sf.IsLocal() {
+	} else if chunkCount <= 0 && sf.IsLocal() {
 		log.Printf("Download of file '%s' finished.\n", sf.FilePath())
 		return
 	}
 }
 
-func (s *ShareService) nextDownloadInformation(sf data.SharedFile) (nodeId uuid.UUID, chunk localData.Chunk, err error) {
+func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid.UUID, chunk *localData.Chunk, err error) {
 	// get all replica nodes holding information about remaining chunks to download
 	// select replica node which holds least shared information, to spread information
 	// more quickly in entire network
@@ -170,6 +169,7 @@ func (s *ShareService) nextDownloadInformation(sf data.SharedFile) (nodeId uuid.
 
 	chunkDist := make(map[string][]data.ReplicaNode)
 	for _, c := range chunks {
+		log.Printf("In nextDownload chunk %p\n", c)
 		replicaNodes := sf.ReplicaNodesByChunk(c.Checksum())
 		if len(replicaNodes) <= 0 {
 			continue

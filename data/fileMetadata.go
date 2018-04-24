@@ -8,18 +8,14 @@ import (
 
 // have to use exported members for JSON unmarshalling
 type FileMetadata struct {
-	FileId           string  `json:"fileId"`
-	FileSize         int64   `json:"fileSize"`
-	FileChecksum     string  `json:"checksum"`
-	FileName         string  `json:"fileName"`
-	FileChunks       []Chunk `json:"chunks"`
-	FileRelativePath string  `json:"relativePath"`
-	FilePath         string  `json:"filePath"`
+	FileId           string   `json:"fileId"`
+	FileSize         int64    `json:"fileSize"`
+	FileChecksum     string   `json:"checksum"`
+	FileName         string   `json:"fileName"`
+	FileChunks       []*Chunk `json:"chunks"`
+	FileRelativePath string   `json:"relativePath"`
+	FilePath         string   `json:"filePath"`
 }
-
-//func New(filePath string) *FileMetadata {
-//        return newFileMetadata(uuid.New(), filePath, "")
-//}
 
 func NewFileMetadata(filePath string, relativePath string) *FileMetadata {
 	return newFileMetadata(uuid.New().String(), filePath, relativePath)
@@ -48,7 +44,7 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 	return f
 }
 
-func (f FileMetadata) Chunks() []Chunk {
+func (f FileMetadata) Chunks() []*Chunk {
 	return f.FileChunks
 }
 
@@ -61,7 +57,7 @@ func (f FileMetadata) Checksum() string {
 	return f.FileChecksum
 }
 
-func (f FileMetadata) SetChecksum(checksum string) {
+func (f *FileMetadata) SetChecksum(checksum string) {
 	f.FileChecksum = checksum
 }
 
@@ -69,7 +65,7 @@ func (f FileMetadata) Path() string {
 	return f.FilePath
 }
 
-func (f FileMetadata) SetFilePath(filePath string) {
+func (f *FileMetadata) SetFilePath(filePath string) {
 	f.FilePath = filePath
 }
 

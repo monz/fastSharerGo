@@ -38,7 +38,7 @@ func (sf SharedFile) Checksum() string {
 
 func (sf SharedFile) IsLocal() bool {
 	var isLocal bool
-	expectedChunkCount := data.GetChunkCount(sf.FileMetadata.Size())
+	expectedChunkCount := data.ChunkCount(sf.FileMetadata.Size())
 	actualChunkCount := len(sf.FileMetadata.Chunks())
 	if actualChunkCount > 0 && actualChunkCount == expectedChunkCount {
 		isLocal = sf.FileMetadata.AllChunksLocal()
@@ -90,11 +90,11 @@ func (sf *SharedFile) IsDownloadActive() bool {
 	return sf.downloadActive
 }
 
-func (sf *SharedFile) ChunksToDownload() []data.Chunk {
+func (sf *SharedFile) ChunksToDownload() []*data.Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	var chunks []data.Chunk
+	var chunks []*data.Chunk
 	if len(sf.FileMetadata.Chunks()) > 0 && !sf.IsLocal() {
 		for _, c := range sf.FileMetadata.Chunks() {
 			if !c.IsLocal() && !c.IsDownloadActive() && len(c.Checksum()) > 0 {

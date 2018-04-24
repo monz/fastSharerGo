@@ -85,7 +85,7 @@ func (c Chunk) Checksum() string {
 	return c.ChunkChecksum
 }
 
-func (c Chunk) SetChecksum(checksum string) {
+func (c *Chunk) SetChecksum(checksum string) {
 	c.ChunkChecksum = checksum
 }
 
@@ -111,19 +111,19 @@ func (c Chunk) RequestAnswered() {
 	// waitSince = -1
 }
 
-func GetChunkCount(fileSize int64) int {
+func ChunkCount(fileSize int64) int {
 	return int(math.Ceil(float64(fileSize) / CHUNK_SIZE))
 }
 
-func GetChunks(fileId string, fileSize int64) []Chunk {
-	var chunks []Chunk
+func GetChunks(fileId string, fileSize int64) []*Chunk {
+	var chunks []*Chunk
 
 	remainingSize := fileSize
 	size := int64(math.Min(CHUNK_SIZE, float64(remainingSize)))
 	for size > 0 {
 		offset := fileSize - remainingSize
 		chunk := NewChunk(fileId, offset, size)
-		chunks = append(chunks, *chunk)
+		chunks = append(chunks, chunk)
 		remainingSize -= int64(size)
 		size = CHUNK_SIZE
 		if (remainingSize - CHUNK_SIZE) < 0 {
