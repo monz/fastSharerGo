@@ -2,7 +2,6 @@ package net
 
 import (
 	"bufio"
-	"container/list"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -14,7 +13,7 @@ import (
 )
 
 const (
-	socketTiemout = time.Second * 5
+	socketTimeout = time.Second * 5
 )
 
 type NetworkService struct {
@@ -64,9 +63,47 @@ func (n *NetworkService) Sender() chan data.ShareCommand {
 	return n.sender
 }
 
-func (n NetworkService) sendCommand(cmd data.ShareCommand) {
-	// todo: implmenent
-	log.Println("Send command:", cmd.Type())
+func (n *NetworkService) sendCommand(cmd data.ShareCommand) {
+	node, ok := n.nodes[cmd.Destination()]
+	if !ok {
+		log.Printf("Node '%s' not found\n", cmd.Destination())
+		cmd.Callback()
+		return
+	}
+
+	successfullySend := false
+	for _, ip := range node.Ips() {
+		// connect to node, or use existing connection
+		s, err := node.Connect(ip, n.cmdPort, socketTimeout)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		// send share command
+		log.Printf("Send command: '%v'", cmd)
+		data, err := data.SerializeShareCommand(cmd)
+		if err != nil {
+			log.Println(err)
+			break
+		}
+		_, err = s.Write(data)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		_, err = s.Write([]byte{'\n'})
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		log.Println("Command was actually sent!")
+		successfullySend = true
+	}
+	// remove node from list if could not send message successfully
+	if !successfullySend {
+		n.RemoveNode(*node)
+		cmd.Callback()
+	}
 }
 
 func (n *NetworkService) send() {
@@ -169,20 +206,20 @@ func (n NetworkService) receivedDownloadRequestResult() {
 	}
 }
 
-func (n NetworkService) receivedShareList(l *list.List) {
+func (n NetworkService) receivedShareList(l []interface{}) {
 	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
 		// update subscriber for all data list entries
-		for i := l.Front(); i != nil; i = i.Next() {
-			s.ReceivedShareList(i.Value.(data.SharedFile))
+		for _, v := range l {
+			s.ReceivedShareList(v.(data.SharedFile))
 		}
 	}
 }
 
 // helper func to print command data elements
 func printCmd(cmd data.ShareCommand) {
-	for i := cmd.Data().Front(); i != nil; i = i.Next() {
-		log.Println(i.Value)
+	for _, v := range cmd.Data() {
+		log.Println(v)
 	}
 }
 

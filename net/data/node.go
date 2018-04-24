@@ -1,47 +1,55 @@
 package data
 
 import (
-        "container/list"
-        "net"
-        "github.com/google/uuid"
+	"fmt"
+	"github.com/google/uuid"
+	"net"
+	"time"
 )
 
 type Node struct {
-        id uuid.UUID
-        ips map[string]bool
-        lastTimeSeen int64
-        socket net.TCPConn
+	id           uuid.UUID
+	ips          []string
+	lastTimeSeen int64
+	conn         *net.TCPConn
 }
 
 func NewNode(id uuid.UUID, ip string) *Node {
-        node := new(Node)
-        node.id = id
-        node.ips = make(map[string]bool)
-        node.ips[ip] = true
+	node := new(Node)
+	node.id = id
+	node.ips = append(node.ips, ip)
 
-        return node
+	return node
 }
 
 func (n Node) Id() uuid.UUID {
-        return n.id
+	return n.id
 }
 
-func (n Node) Ips() *list.List {
-        ips := list.New()
-        for k, _ := range n.ips {
-                ips.PushBack(k)
-        }
-        return ips
+func (n Node) Ips() []string {
+	return n.ips
 }
 
 func (n Node) LastTimeSeen() int64 {
-        return n.lastTimeSeen
+	return n.lastTimeSeen
 }
 
 func (n Node) SetLastTimeSeen(lastTimeSeen int64) {
-        n.lastTimeSeen = lastTimeSeen
+	n.lastTimeSeen = lastTimeSeen
 }
 
-func (n Node) Connect(ip string, port int, timeout int) {
-        // todo: Implement
+func (n *Node) Connect(ip string, port int, timeout time.Duration) (*net.TCPConn, error) {
+	if n.conn == nil {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), timeout)
+		if err != nil {
+			return nil, err
+		}
+		tcpConn, ok := conn.(*net.TCPConn)
+		if !ok {
+			return nil, err
+		}
+		n.conn = tcpConn
+	}
+
+	return n.conn, nil
 }

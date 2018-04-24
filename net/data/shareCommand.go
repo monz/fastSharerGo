@@ -1,7 +1,6 @@
 package data
 
 import (
-	"container/list"
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
@@ -62,40 +61,49 @@ func (c *Cmd) UnmarshalJSON(b []byte) error {
 	return c.ParseString(cmdString)
 }
 
+type Callback func()
+
 type ShareCommand struct {
-	cmdType     Cmd
-	data        *list.List
+	CmdType     Cmd           `json:"cmd"`
+	CmdData     []interface{} `json:"data"`
 	destination uuid.UUID
+	callback    Callback
 }
 
 func NewEmptyShareCommand() *ShareCommand {
 	cmd := new(ShareCommand)
-	cmd.data = list.New()
 
 	return cmd
 }
 
-func NewShareCommand(cmdType Cmd, data *list.List, destination uuid.UUID) *ShareCommand {
+func NewShareCommand(cmdType Cmd, data []interface{}, destination uuid.UUID, callback Callback) *ShareCommand {
 	cmd := new(ShareCommand)
-	cmd.cmdType = cmdType
-	cmd.data = data
+	cmd.CmdType = cmdType
+	cmd.CmdData = data
 	cmd.destination = destination
+	cmd.callback = callback
 
 	return cmd
 }
 
 func (c ShareCommand) Type() Cmd {
-	return c.cmdType
+	return c.CmdType
 }
 
-func (c ShareCommand) Data() *list.List {
-	return c.data
+func (c ShareCommand) Data() []interface{} {
+	return c.CmdData
 }
 
-func SerializeShareCommand(c ShareCommand) []byte {
-	// todo: implement
-	var b []byte
-	return b
+func (c ShareCommand) Destination() uuid.UUID {
+	return c.destination
+}
+
+func (c ShareCommand) Callback() {
+	c.callback()
+}
+
+func SerializeShareCommand(c ShareCommand) ([]byte, error) {
+	return json.Marshal(c)
 }
 
 func DeserializeShareCommand(b []byte, c *ShareCommand) error {
@@ -116,7 +124,7 @@ func DeserializeShareCommand(b []byte, c *ShareCommand) error {
 	if err != nil {
 		return err
 	}
-	if err := c.cmdType.ParseString(cmdType); err != nil {
+	if err := c.CmdType.ParseString(cmdType); err != nil {
 		return err
 	}
 	log.Println("Could read command type", cmdType)
@@ -142,21 +150,21 @@ func DeserializeShareCommand(b []byte, c *ShareCommand) error {
 			if err != nil {
 				return err
 			}
-			c.data.PushBack(v)
+			c.CmdData = append(c.CmdData, v)
 		case DownloadRequestCmd:
 			var v DownloadRequest
 			err := json.Unmarshal(*rawMessage, &v)
 			if err != nil {
 				return err
 			}
-			c.data.PushBack(v)
+			c.CmdData = append(c.CmdData, v)
 		case DownloadRequestResultCmd:
 			var v DownloadRequestResult
 			err := json.Unmarshal(*rawMessage, &v)
 			if err != nil {
 				return err
 			}
-			c.data.PushBack(v)
+			c.CmdData = append(c.CmdData, v)
 		default:
 			err := errors.New("Should never happen")
 			if err != nil {

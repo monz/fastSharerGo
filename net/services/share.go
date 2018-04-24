@@ -1,7 +1,6 @@
 package net
 
 import (
-	"container/list"
 	"errors"
 	"github.com/google/uuid"
 	localData "github.com/monz/fastSharerGo/data"
@@ -136,9 +135,14 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 		}
 
 		// send download request for chunk
-		request := list.New()
-		request.PushBack(data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum()))
-		cmd := data.NewShareCommand(data.DownloadRequestCmd, request, nodeId)
+		request := []interface{}{data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum())}
+		cmd := data.NewShareCommand(data.DownloadRequestCmd, request, nodeId, func() {
+			log.Println("Could not send message!")
+			//go s.requestDownload(sf, 500)
+			if !chunk.DeactivateDownload() {
+				log.Println("Could not deactivate download of chunk", chunk.Checksum())
+			}
+		})
 		s.sender <- *cmd
 
 		// check wether new chunk information arrived
