@@ -368,7 +368,7 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 		go s.requestDownload(sf, 1500) // todo: reduce time to 500ms
 		return
 	} else if chunkCount <= 0 && sf.IsLocal() {
-		log.Printf("Download of file '%s' finished.\n", sf.FilePath())
+		log.Printf("Download of file '%s' finished.\n", sf.FileName())
 		return
 	}
 }

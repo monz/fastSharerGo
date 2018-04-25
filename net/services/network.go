@@ -162,11 +162,14 @@ func (n *NetworkService) acceptConnections() {
 func (n *NetworkService) handleConnection(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	for {
-		cmd, err := readCommand(scanner)
+		cmd, ok, err := readCommand(scanner)
 		if err != nil {
 			log.Println("Could not read ShareCommand!")
 			log.Println(err)
-			time.Sleep(2 * time.Second)
+			if !ok {
+				conn.Close()
+				break
+			}
 			continue
 		}
 		switch cmd.Type() {
@@ -225,7 +228,7 @@ func printCmd(cmd data.ShareCommand) {
 	}
 }
 
-func readCommand(r *bufio.Scanner) (*data.ShareCommand, error) {
+func readCommand(r *bufio.Scanner) (*data.ShareCommand, bool, error) {
 	var line string
 
 	// maybe dont use scanner, just need []byte
@@ -236,14 +239,14 @@ func readCommand(r *bufio.Scanner) (*data.ShareCommand, error) {
 		cmd := data.NewEmptyShareCommand()
 		err := data.DeserializeShareCommand([]byte(line), cmd)
 		if err != nil {
-			return nil, err
+			return nil, ok, err
 		}
-		return cmd, nil
+		return cmd, ok, nil
 
 	} else {
 		if err := r.Err(); err != nil {
-			return nil, err
+			return nil, ok, err
 		}
 	}
-	return nil, errors.New("Could not read command")
+	return nil, true, errors.New("Could not read command")
 }
