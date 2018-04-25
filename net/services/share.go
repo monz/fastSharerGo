@@ -167,7 +167,7 @@ func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chu
 
 func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, filePath string, err error) {
 	// create directory structure including download directory
-	filePath = s.downloadFilePath(sf)
+	filePath = s.downloadFilePath(sf, true)
 	log.Println("The download file path = ", filePath)
 	downloadDir := path.Dir(filePath)
 	err = os.MkdirAll(downloadDir, os.ModeDir)
@@ -258,6 +258,11 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 	// add/update share file list
 	sf, ok := s.sharedFiles[remoteSf.FileId()]
 	if ok {
+		// if file is local stop here
+		if sf.IsLocal() {
+			log.Println("File is local, do not have to download")
+			return
+		}
 		// update
 		//consolidatedSf, err := s.consolidateSharedFileInfo(remoteSf)
 		err := s.consolidateSharedFileInfo(sf, remoteSf)
@@ -273,9 +278,24 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 		sf = &remoteSf
 	}
 
-	filePath := s.downloadFilePath(*sf)
+	filePath := s.downloadFilePath(*sf, false)
+	log.Println("This is the file path:", filePath)
 	isExisting := fileExists(filePath)
-	isComplete := fileComplete(filePath)
+	isComplete := !isExisting
+	if isExisting {
+		var err error
+		isComplete, err = fileComplete(filePath, sf.Checksum(), sf.Chunks())
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		if isComplete {
+			for _, c := range sf.Chunks() {
+				c.SetLocal(true)
+			}
+		}
+	}
+	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", isExisting, isComplete)
 	if isExisting && isComplete {
 		log.Println("File already downloaded")
 		return
@@ -437,8 +457,12 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remot
 	return nil
 }
 
-func (s *ShareService) downloadFilePath(sf data.SharedFile) string {
-	return path.Join(s.downloadDir, sf.FileRelativePath()) + s.downloadExtension
+func (s *ShareService) downloadFilePath(sf data.SharedFile, withExtension bool) string {
+	filePath := path.Join(s.downloadDir, sf.FileRelativePath())
+	if withExtension {
+		filePath += s.downloadExtension
+	}
+	return filePath
 }
 
 func fileExists(filePath string) bool {
@@ -451,9 +475,30 @@ func fileExists(filePath string) bool {
 	return exists
 }
 
-func fileComplete(filePath string) bool {
-	// todo: implement
-	return true
+func fileComplete(filePath string, checksum string, chunks []*localData.Chunk) (bool, error) {
+	// open file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	completeHash := md5.New()
+	for _, chunk := range chunks {
+		// jump to offset
+		sectionReader := io.NewSectionReader(file, chunk.Offset(), chunk.Size())
+		// calculate checksum
+		hash := md5.New()
+		_, err = io.Copy(hash, sectionReader)
+		if err != nil {
+			return false, err
+		}
+
+		io.WriteString(completeHash, fmt.Sprintf("%x", hash.Sum(nil)))
+	}
+	calculatedChecksum := fmt.Sprintf("%x", completeHash.Sum(nil))
+
+	log.Printf("FileComplete: expectedSum = %s, actualSum = %s\n", checksum, calculatedChecksum)
+	return checksum == calculatedChecksum, nil
 }
 
 func enoughSpace(filePath string) bool {
