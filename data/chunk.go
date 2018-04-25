@@ -37,7 +37,9 @@ func (c Chunk) SetFileId(fileId string) {
 	c.fileId = fileId
 }
 
-func (c Chunk) SetLocal(isLocal bool) {
+func (c *Chunk) SetLocal(isLocal bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.isLocal = isLocal
 }
 

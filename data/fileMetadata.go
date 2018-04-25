@@ -1,8 +1,6 @@
 package data
 
 import (
-	"errors"
-	"fmt"
 	"github.com/google/uuid"
 	"log"
 	"os"
@@ -44,6 +42,14 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 	f.FileChunks = GetChunks(f.FileId, f.FileSize)
 
 	return f
+}
+
+func (f FileMetadata) Name() string {
+	return f.FileName
+}
+
+func (f *FileMetadata) AddChunk(chunk *Chunk) {
+	f.FileChunks = append(f.FileChunks, chunk)
 }
 
 func (f FileMetadata) Chunks() []*Chunk {
@@ -98,16 +104,13 @@ func (f FileMetadata) AllChunksLocal() bool {
 	return allChunksLocal
 }
 
-func (f FileMetadata) ChunkById(chunkChecksum string) (*Chunk, error) {
-	var chunk *Chunk
+func (f FileMetadata) ChunkById(chunkChecksum string) (chunk *Chunk, ok bool) {
 	for _, c := range f.FileChunks {
 		if c.Checksum() == chunkChecksum {
 			chunk = c
+			ok = true
+			break
 		}
 	}
-	var err error
-	if chunk == nil {
-		err = errors.New(fmt.Sprintf("Could not find chunk with checksum '%s'", chunkChecksum))
-	}
-	return chunk, err
+	return chunk, ok
 }

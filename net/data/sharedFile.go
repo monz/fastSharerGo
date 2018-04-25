@@ -3,6 +3,7 @@ package data
 import (
 	"github.com/google/uuid"
 	"github.com/monz/fastSharerGo/data"
+	"log"
 	"sync"
 )
 
@@ -20,32 +21,36 @@ func NewSharedFile(metadata data.FileMetadata) *SharedFile {
 	return sf
 }
 
-func (sf SharedFile) FilePath() string {
-	return sf.FileMetadata.Path()
+func (sf SharedFile) FileName() string {
+	return sf.FileMetadata.Name()
 }
 
-func (sf SharedFile) SetFilePath(filePath string) {
-	sf.FileMetadata.SetFilePath(filePath)
+func (sf SharedFile) FilePath() string {
+	return sf.FileMetadata.Path()
 }
 
 func (sf SharedFile) FileRelativePath() string {
 	return sf.FileMetadata.RelativePath()
 }
 
-func (sf SharedFile) Metadata() data.FileMetadata {
-	return sf.FileMetadata
-}
-
 func (sf SharedFile) Checksum() string {
 	return sf.FileMetadata.Checksum()
+}
+
+func (sf *SharedFile) SetChecksum(checksum string) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	sf.FileMetadata.SetChecksum(checksum)
 }
 
 func (sf SharedFile) IsLocal() bool {
 	var isLocal bool
 	expectedChunkCount := data.ChunkCount(sf.FileMetadata.Size())
 	actualChunkCount := len(sf.FileMetadata.Chunks())
+	log.Printf("In isLocal: expectedChunkCount = %d, actualChunkCount = %d\n", expectedChunkCount, actualChunkCount)
 	if actualChunkCount > 0 && actualChunkCount == expectedChunkCount {
 		isLocal = sf.FileMetadata.AllChunksLocal()
+		log.Printf("All chunk local = %v\n", isLocal)
 	} else {
 		isLocal = false
 	}
@@ -58,6 +63,12 @@ func (sf SharedFile) FileId() string {
 
 func (sf SharedFile) ReplicaNodes() map[uuid.UUID]ReplicaNode {
 	return sf.FileReplicaNodes
+}
+
+func (sf *SharedFile) AddReplicaNode(replicaNode ReplicaNode) {
+	// todo: implement
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
 }
 
 // use semaphores to make method atomic!!!
@@ -94,6 +105,18 @@ func (sf *SharedFile) IsDownloadActive() bool {
 	return sf.downloadActive
 }
 
+func (sf *SharedFile) AddChunk(chunk *data.Chunk) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	sf.FileMetadata.AddChunk(chunk)
+}
+
+func (sf *SharedFile) Chunks() []*data.Chunk {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.FileMetadata.Chunks()
+}
+
 func (sf *SharedFile) ChunksToDownload() []*data.Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -121,6 +144,6 @@ func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
 	return replicaNodes
 }
 
-func (sf SharedFile) ChunkById(chunkChecksum string) (*data.Chunk, error) {
+func (sf SharedFile) ChunkById(chunkChecksum string) (*data.Chunk, bool) {
 	return sf.FileMetadata.ChunkById(chunkChecksum)
 }

@@ -27,14 +27,15 @@ const (
 )
 
 type ShareService struct {
-	localNodeId  uuid.UUID
-	nodes        map[uuid.UUID]*data.Node
-	downloadDir  string
-	maxUploads   chan int
-	maxDownloads chan int
-	sharedFiles  map[string]data.SharedFile
-	sender       chan data.ShareCommand
-	mu           sync.Mutex
+	localNodeId       uuid.UUID
+	nodes             map[uuid.UUID]*data.Node
+	downloadDir       string
+	downloadExtension string
+	maxUploads        chan int
+	maxDownloads      chan int
+	sharedFiles       map[string]*data.SharedFile
+	sender            chan data.ShareCommand
+	mu                sync.Mutex
 }
 
 func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
@@ -42,9 +43,10 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, downl
 	s.localNodeId = localNodeId
 	s.nodes = make(map[uuid.UUID]*data.Node)
 	s.downloadDir = downloadDir
+	s.downloadExtension = ".part" // load from paramter
 	s.maxUploads = initSema(maxUploads)
 	s.maxDownloads = initSema(maxDownloads)
-	s.sharedFiles = make(map[string]data.SharedFile)
+	s.sharedFiles = make(map[string]*data.SharedFile)
 	s.sender = sender
 	// init random
 	rand.Seed(time.Now().UnixNano())
@@ -84,9 +86,9 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 		s.downloadFail(nil)
 		return
 	}
-	chunk, err := sf.ChunkById(rr.ChunkChecksum())
-	if err != nil {
-		log.Println(err)
+	chunk, ok := sf.ChunkById(rr.ChunkChecksum())
+	if !ok {
+		log.Println("Could not find chunk:", rr.ChunkChecksum())
 		s.downloadFail(nil)
 		return
 	}
@@ -108,15 +110,15 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 	defer tcpConn.Close()
 
 	// download chunk
-	checksum, err := s.receiveData(tcpConn, sf, chunk)
+	checksum, filePath, err := s.receiveData(tcpConn, *sf, chunk)
 	if err != nil {
 		log.Println(err)
 		s.downloadFail(chunk)
 	} else if checksum != rr.ChunkChecksum() {
-		log.Println("Checksum of downloaded chunk does not match!")
+		log.Printf("Checksum of downloaded chunk does not match! Was '%s', expected '%s'\n", checksum, rr.ChunkChecksum())
 		s.downloadFail(chunk)
 	} else {
-		s.downloadSuccess(sf, chunk)
+		s.downloadSuccess(sf, chunk, filePath)
 	}
 }
 
@@ -132,11 +134,11 @@ func (s *ShareService) connectToRemote(nodeId string, port int) (*net.TCPConn, e
 
 	var tcpConn *net.TCPConn
 	for _, ip := range node.Ips() {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf(ip, port), socketTimeout)
-		tcpConn = conn.(*net.TCPConn)
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), socketTimeout)
 		if err != nil {
 			return nil, err
 		}
+		tcpConn = conn.(*net.TCPConn)
 		break
 	}
 	return tcpConn, nil
@@ -146,29 +148,60 @@ func (s *ShareService) downloadFail(chunk *localData.Chunk) {
 	// todo: implement
 }
 
-func (s *ShareService) downloadSuccess(sf data.SharedFile, chunk *localData.Chunk) {
-	// todo: implement
+func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chunk, oldFilePath string) {
+	log.Printf("Download of chunk '%s' of file '%s' was successful\n", chunk.Checksum(), sf.FileId())
+	chunk.SetLocal(true)
+	chunk.DeactivateDownload()
+	// check whether file was completley downloaded
+	if sf.IsLocal() {
+		log.Printf("Rename file '%s' to finish download\n", sf.FileName())
+		err := os.Rename(oldFilePath, path.Join(path.Dir(oldFilePath), sf.FileName()))
+		if err != nil {
+			log.Println(err)
+		}
+		sf.DeactivateDownload()
+	} else {
+		log.Printf("File '%s' is not finished yet, chunk to download %d\n", sf.FileName(), len(sf.ChunksToDownload()))
+	}
 }
 
-func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, err error) {
+func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, filePath string, err error) {
 	// create directory structure including download directory
-	path := path.Dir(path.Join(s.downloadDir, sf.FileRelativePath()))
-	err = os.MkdirAll(path, os.ModeDir)
+	filePath = s.downloadFilePath(sf)
+	log.Println("The download file path = ", filePath)
+	downloadDir := path.Dir(filePath)
+	err = os.MkdirAll(downloadDir, os.ModeDir)
 	if err != nil {
-		return checksum, err
+		return checksum, filePath, err
 	}
 
 	// write data to file
-	file, err := os.Open(path)
-	if err != nil {
-		return checksum, err
+
+	//file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	//if err != nil {
+	//	return checksum, filePath, err
+	//}
+
+	var file *os.File
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		log.Println("File does not exist. Create new file.")
+		file, err = os.Create(filePath)
+		if err != nil {
+			return checksum, filePath, err
+		}
+	} else {
+		log.Println("File exists. Open file for write.")
+		file, err = os.OpenFile(filePath, os.O_WRONLY, 0644)
+		if err != nil {
+			return checksum, filePath, err
+		}
 	}
 
 	// advance read pointer to offset
 	if chunk.Offset() > 0 {
 		_, err = file.Seek(chunk.Offset(), 0)
 		if err != nil {
-			return checksum, err
+			return checksum, filePath, err
 		}
 	}
 
@@ -181,72 +214,98 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk 
 	bufReader := bytes.NewReader(buf)
 	reader := bufio.NewReader(conn)
 	n, err := reader.Read(buf)
+	log.Printf("Could read '%d' bytes with err '%s'\n", n, err)
 	if err != nil {
-		return checksum, err
+		log.Println("THIS IS THE ERROR: ", err)
+		return checksum, filePath, err
 	}
 	multiWriter := io.MultiWriter(file, hash)
 	for n > 0 && err != io.EOF {
 		if (remainingBytes - int64(n)) > 0 {
 			_, err = io.Copy(multiWriter, bufReader)
 			if err != nil {
-				return checksum, err
+				return checksum, filePath, err
 			}
 			//file.Write(buf, 0, n)
 			remainingBytes -= int64(n)
 			n, err = reader.Read(buf)
 		} else {
+			log.Println("Should be updating hash here")
 			_, err = io.CopyN(multiWriter, bufReader, int64(remainingBytes))
+			if err != nil {
+				return checksum, filePath, err
+			}
 			//file.Write(buf, 0, remainingBytes)
 			break
 		}
 	}
 	file.Close()
 
-	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+	return fmt.Sprintf("%x", hash.Sum(nil)), filePath, nil
+}
+
+func (s *ShareService) helperPrint() {
+	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
+	for key, _ := range s.sharedFiles {
+		log.Printf("ShareService contains file '%s':\n", key)
+	}
 }
 
 // implement shareSubscriber interface
 func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 	log.Println("Added shared file from other client")
-
-	sf, err := s.consolidateSharedFileInfo(remoteSf)
-	if err != nil {
-		log.Println(err)
-		return
+	s.helperPrint()
+	// add/update share file list
+	sf, ok := s.sharedFiles[remoteSf.FileId()]
+	if ok {
+		// update
+		//consolidatedSf, err := s.consolidateSharedFileInfo(remoteSf)
+		err := s.consolidateSharedFileInfo(sf, remoteSf)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		//s.sharedFiles[consolidatedSf.FileId()] = &consolidatedSf
+		//sf = &consolidatedSf
+	} else {
+		// add
+		s.sharedFiles[remoteSf.FileId()] = &remoteSf
+		sf = &remoteSf
 	}
 
-	isExisting := fileExists(sf.FilePath())
-	isComplete := fileComplete(sf.FilePath())
+	filePath := s.downloadFilePath(*sf)
+	isExisting := fileExists(filePath)
+	isComplete := fileComplete(filePath)
 	if isExisting && isComplete {
 		log.Println("File already downloaded")
 		return
 	} else if isExisting && !isComplete {
 		log.Println("Delete corrupted file")
-		err := os.Remove(sf.FilePath())
+		err := os.Remove(filePath)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 	} else if sf.IsDownloadActive() {
-		log.Printf("Download of file '%s' already active\n", sf.FilePath())
+		log.Printf("Download of file '%s' already active\n", sf.FileName())
 		return
 	} else {
 		// maybe move activateDownload into download function
 		// currently used to mark sharedFile as 'already handled'
 		// to prevent cyclicly checking if downloaded files are complete
 		if ok := sf.ActivateDownload(); !ok {
-			log.Fatal("Could not activate download of file", sf.FilePath())
+			log.Fatal("Could not activate download of file", sf.FileName())
 		}
 	}
 
 	// check for enough space on disk
 	if !enoughSpace(sf.FilePath()) {
-		log.Println("Not enough disk space to download file:", sf.FilePath())
+		log.Println("Not enough disk space to download file:", sf.FileName())
 		return
 	}
 
 	// activate download
-	go s.requestDownload(&sf, 0)
+	go s.requestDownload(sf, 0)
 }
 
 func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Duration) {
@@ -359,14 +418,37 @@ func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid
 	return nodeId, chunk, nil
 }
 
-func (s *ShareService) consolidateSharedFileInfo(remoteSf data.SharedFile) (data.SharedFile, error) {
-	// todo: implement
-	return remoteSf, nil
+func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remoteSf data.SharedFile) error {
+	// add replica nodes
+	for _, node := range remoteSf.ReplicaNodes() {
+		localSf.AddReplicaNode(node)
+	}
+	// update shared file checksum
+	if len(localSf.Checksum()) <= 0 {
+		localSf.SetChecksum(remoteSf.Checksum())
+	}
+	// add new chunk information
+	for _, remoteChunk := range remoteSf.Chunks() {
+		_, ok := localSf.ChunkById(remoteChunk.Checksum())
+		if !ok {
+			localSf.AddChunk(remoteChunk)
+		}
+	}
+	return nil
+}
+
+func (s *ShareService) downloadFilePath(sf data.SharedFile) string {
+	return path.Join(s.downloadDir, sf.FileRelativePath()) + s.downloadExtension
 }
 
 func fileExists(filePath string) bool {
-	// todo: implement
-	return false
+	var exists bool
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		exists = false
+	} else {
+		exists = true
+	}
+	return exists
 }
 
 func fileComplete(filePath string) bool {
