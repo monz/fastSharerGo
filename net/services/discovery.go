@@ -1,6 +1,7 @@
 package net
 
 import (
+	"fmt"
 	"github.com/google/uuid"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
@@ -13,18 +14,20 @@ const MSG_SIZE = 36
 type DiscoveryService struct {
 	localNodeId uuid.UUID
 	c           *net.UDPConn
+	port        int
 	initDelay   time.Duration
 	period      time.Duration
 	localIps    map[string]bool
 	subscriber  []data.NodeSubscriber
 }
 
-func NewDiscoveryService(initDelay time.Duration, period time.Duration) *DiscoveryService {
+func NewDiscoveryService(port int, initDelay time.Duration, period time.Duration) *DiscoveryService {
 	d := new(DiscoveryService)
+	d.port = port
 	d.initDelay = initDelay
 	d.period = period
 
-	localAddress, err := net.ResolveUDPAddr("udp", "0.0.0.0:9942")
+	localAddress, err := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", d.port))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -144,7 +147,7 @@ func (d DiscoveryService) send() {
 	time.Sleep(time.Second * d.initDelay)
 
 	// define broadcast address
-	destAddress, err := net.ResolveUDPAddr("udp", "255.255.255.255:9942")
+	destAddress, err := net.ResolveUDPAddr("udp", fmt.Sprintf("255.255.255.255:%d", d.port))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -166,6 +169,6 @@ func (d DiscoveryService) send() {
 			log.Fatal("Could not write discovery message properly!")
 		}
 		// wait
-		time.Sleep(time.Second * d.period)
+		time.Sleep(d.period)
 	}
 }
