@@ -1,8 +1,6 @@
 package net
 
 import (
-	"bufio"
-	"bytes"
 	"crypto/md5"
 	"errors"
 	"fmt"
@@ -145,7 +143,13 @@ func (s *ShareService) connectToRemote(nodeId string, port int) (*net.TCPConn, e
 }
 
 func (s *ShareService) downloadFail(chunk *localData.Chunk) {
-	// todo: implement
+	if chunk != nil {
+		log.Printf("Download of chunk '%s' failed.", chunk.Checksum())
+		chunk.DeactivateDownload()
+	}
+	// release download token
+	s.maxDownloads <- 1
+	log.Println("Released download token")
 }
 
 func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chunk, oldFilePath string) {
@@ -163,6 +167,9 @@ func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chu
 	} else {
 		log.Printf("File '%s' is not finished yet, chunk to download %d\n", sf.FileName(), len(sf.ChunksToDownload()))
 	}
+	// release download token
+	s.maxDownloads <- 1
+	log.Println("Released download token")
 }
 
 func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, filePath string, err error) {
@@ -176,12 +183,6 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk 
 	}
 
 	// write data to file
-
-	//file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	//if err != nil {
-	//	return checksum, filePath, err
-	//}
-
 	var file *os.File
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		log.Println("File does not exist. Create new file.")
@@ -209,35 +210,11 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk 
 	hash := md5.New()
 
 	// simultaneously download, write to file, calculate checksum
-	remainingBytes := chunk.Size()
-	buf := make([]byte, bufferSize)
-	bufReader := bytes.NewReader(buf)
-	reader := bufio.NewReader(conn)
-	n, err := reader.Read(buf)
-	log.Printf("Could read '%d' bytes with err '%s'\n", n, err)
-	if err != nil {
-		log.Println("THIS IS THE ERROR: ", err)
-		return checksum, filePath, err
-	}
 	multiWriter := io.MultiWriter(file, hash)
-	for n > 0 && err != io.EOF {
-		if (remainingBytes - int64(n)) > 0 {
-			_, err = io.Copy(multiWriter, bufReader)
-			if err != nil {
-				return checksum, filePath, err
-			}
-			//file.Write(buf, 0, n)
-			remainingBytes -= int64(n)
-			n, err = reader.Read(buf)
-		} else {
-			log.Println("Should be updating hash here")
-			_, err = io.CopyN(multiWriter, bufReader, int64(remainingBytes))
-			if err != nil {
-				return checksum, filePath, err
-			}
-			//file.Write(buf, 0, remainingBytes)
-			break
-		}
+	n, err := io.Copy(multiWriter, conn)
+	log.Printf("Could read '%d' bytes with err '%s'\n", n, err)
+	if err != nil || n != chunk.Size() {
+		return checksum, filePath, err
 	}
 	file.Close()
 
@@ -333,33 +310,33 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 	// delay download request
 	time.Sleep(initialDelay * time.Millisecond)
 
-	// limit request to maxDownload count
-	// take download token
-	// todo: add timeout with switch;select...??
-	<-s.maxDownloads
-	defer func() { s.maxDownloads <- 1 }()
-	log.Println("Could aquire download token")
-
 	// get list of all chunks still to download
 	chunkCount := len(sf.ChunksToDownload())
 	for chunkCount > 0 {
 		log.Printf("Remaining chunks to download: %d, for file %p\n", chunkCount, sf)
-		time.Sleep(5 * time.Second)
+		log.Println("Waiting while acquiring download token...")
+		// limit request to maxDownload count
+		// take download token
+		// todo: add timeout with switch;select...??
+		<-s.maxDownloads
+		//defer func() { s.maxDownloads <- 1; log.Println("Released download token") }()
+		log.Println("Could aquire download token")
+
 		//select node to download from
 		nodeId, chunk, err := s.nextDownloadInformation(sf)
 		if err != nil {
 			log.Println(err)
 			// reschedule download job
 			log.Println("Reschedule download job")
+			s.downloadFail(nil)
 			go s.requestDownload(sf, 500)
 			return
 		}
 
 		// mark chunk as currently downloading
-		// todo: currently activate download does not work
-		// maybe working on chunk copy not reference!!!!!
 		if !chunk.ActivateDownload() {
 			log.Println("Chunk is already downloading")
+			s.downloadFail(nil)
 			continue
 		}
 
@@ -367,14 +344,15 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 		request := []interface{}{data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum())}
 		cmd := data.NewShareCommand(data.DownloadRequestCmd, request, nodeId, func() {
 			log.Println("Could not send message!")
-			//go s.requestDownload(sf, 500)
 			if !chunk.DeactivateDownload() {
 				log.Println("Could not deactivate download of chunk", chunk.Checksum())
 			}
+			// releas download token
+			s.downloadFail(nil)
 		})
 		s.sender <- *cmd
 
-		// check wether new chunk information arrived
+		// check whether new chunk information arrived
 		chunkCount = len(sf.ChunksToDownload())
 	}
 	// no more download information, check whether file is completely downloaded
@@ -441,7 +419,16 @@ func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid
 func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remoteSf data.SharedFile) error {
 	// add replica nodes
 	for _, node := range remoteSf.ReplicaNodes() {
-		localSf.AddReplicaNode(node)
+		// skip localNode id
+		if node.Id() == s.localNodeId {
+			continue
+		}
+		// skip unknown node
+		_, ok := s.nodes[node.Id()]
+		if !ok {
+			continue
+		}
+		localSf.AddReplicaNode(*node)
 	}
 	// update shared file checksum
 	if len(localSf.Checksum()) <= 0 {

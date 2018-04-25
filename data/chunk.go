@@ -99,10 +99,6 @@ func (c Chunk) Size() int64 {
 	return c.ChunkSize
 }
 
-func (c Chunk) Equals(c2 Chunk) bool {
-	return c.ChunkChecksum == c2.Checksum()
-}
-
 func (c Chunk) HasChecksum() bool {
 	return len(c.ChunkChecksum) > 0
 }

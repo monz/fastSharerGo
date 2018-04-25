@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/monz/fastSharerGo/data"
+	"sync"
 )
 
 type ReplicaNode struct {
@@ -11,6 +12,7 @@ type ReplicaNode struct {
 	chunks           map[string]bool
 	isComplete       bool
 	isStopSharedInfo bool
+	mu               sync.Mutex
 }
 
 // type is only for marshalling/unmarshalling
@@ -84,7 +86,20 @@ func (n ReplicaNode) Id() uuid.UUID {
 	return n.id
 }
 
-func (n ReplicaNode) Chunks() map[string]bool {
+func (n *ReplicaNode) PutIfAbsent(chunkChecksum string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	absent := false
+	_, ok := n.chunks[chunkChecksum]
+	if !ok {
+		n.chunks[chunkChecksum] = true
+		absent = true
+	}
+	return absent
+}
+
+func (n *ReplicaNode) Chunks() map[string]bool {
 	return n.chunks
 }
 

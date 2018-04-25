@@ -8,8 +8,8 @@ import (
 )
 
 type SharedFile struct {
-	FileMetadata     data.FileMetadata         `json:"metadata"`
-	FileReplicaNodes map[uuid.UUID]ReplicaNode `json:"replicaNodes"`
+	FileMetadata     data.FileMetadata          `json:"metadata"`
+	FileReplicaNodes map[uuid.UUID]*ReplicaNode `json:"replicaNodes"`
 	downloadActive   bool
 	mu               sync.Mutex
 }
@@ -17,6 +17,7 @@ type SharedFile struct {
 func NewSharedFile(metadata data.FileMetadata) *SharedFile {
 	sf := new(SharedFile)
 	sf.FileMetadata = metadata
+	sf.FileReplicaNodes = make(map[uuid.UUID]*ReplicaNode)
 
 	return sf
 }
@@ -61,14 +62,28 @@ func (sf SharedFile) FileId() string {
 	return sf.FileMetadata.Id()
 }
 
-func (sf SharedFile) ReplicaNodes() map[uuid.UUID]ReplicaNode {
+func (sf SharedFile) ReplicaNodes() map[uuid.UUID]*ReplicaNode {
 	return sf.FileReplicaNodes
 }
 
-func (sf *SharedFile) AddReplicaNode(replicaNode ReplicaNode) {
-	// todo: implement
+func (sf *SharedFile) AddReplicaNode(newNode ReplicaNode) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
+
+	// put node if absent
+	node, ok := sf.FileReplicaNodes[newNode.Id()]
+	if !ok {
+		sf.FileReplicaNodes[newNode.Id()] = &newNode
+		return
+	}
+	// add new chunk checksums
+	for chunkChecksum, _ := range newNode.Chunks() {
+		// skip invalid checksums
+		if len(chunkChecksum) <= 0 {
+			continue
+		}
+		node.PutIfAbsent(chunkChecksum)
+	}
 }
 
 // use semaphores to make method atomic!!!
@@ -137,7 +152,7 @@ func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
 	var replicaNodes []ReplicaNode
 	for _, replicaNode := range sf.FileReplicaNodes {
 		if replicaNode.Contains(chunkChecksum) {
-			replicaNodes = append(replicaNodes, replicaNode)
+			replicaNodes = append(replicaNodes, *replicaNode)
 		}
 	}
 
