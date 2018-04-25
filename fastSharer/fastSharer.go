@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// todo: load all settings from config file or cmd line
 func main() {
 	fmt.Println("Starting fastSharer...")
 
@@ -18,7 +19,7 @@ func main() {
 	// subscribe to node message updates from discovery service
 	discoService.Register(netService)
 
-	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), 5, 5)
+	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), "/var/vms/dl_tmp10", 5, 5)
 	shareService.Start()
 	// subscribe to share message updates from network service
 	netService.Register(shareService)

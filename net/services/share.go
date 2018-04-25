@@ -29,6 +29,7 @@ const (
 type ShareService struct {
 	localNodeId  uuid.UUID
 	nodes        map[uuid.UUID]*data.Node
+	downloadDir  string
 	maxUploads   chan int
 	maxDownloads chan int
 	sharedFiles  map[string]data.SharedFile
@@ -36,10 +37,11 @@ type ShareService struct {
 	mu           sync.Mutex
 }
 
-func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, maxUploads int, maxDownloads int) *ShareService {
+func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
 	s := new(ShareService)
 	s.localNodeId = localNodeId
 	s.nodes = make(map[uuid.UUID]*data.Node)
+	s.downloadDir = downloadDir
 	s.maxUploads = initSema(maxUploads)
 	s.maxDownloads = initSema(maxDownloads)
 	s.sharedFiles = make(map[string]data.SharedFile)
@@ -96,33 +98,17 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 	}
 
 	log.Printf("Downloading for file '%s', chunk '%s'\n", rr.FileId(), rr.ChunkChecksum())
-	id, err := uuid.Parse(rr.NodeId())
+	// connect to remote node
+	tcpConn, err := s.connectToRemote(rr.NodeId(), rr.DownloadPort())
 	if err != nil {
 		log.Println(err)
 		s.downloadFail(chunk)
 		return
 	}
-	node, ok := s.nodes[id]
-	if !ok {
-		log.Println("Download failed, node not found")
-	}
-
-	// connect to uploading client
-	var tcpConn *net.TCPConn
 	defer tcpConn.Close()
-	for _, ip := range node.Ips() {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf(ip, rr.DownloadPort()), socketTimeout)
-		tcpConn = conn.(*net.TCPConn)
-		if err != nil {
-			log.Println(err)
-			s.downloadFail(chunk)
-			return
-		}
-		break
-	}
 
 	// download chunk
-	checksum, err := s.receiveData(tcpConn, sf.FilePath(), chunk)
+	checksum, err := s.receiveData(tcpConn, sf, chunk)
 	if err != nil {
 		log.Println(err)
 		s.downloadFail(chunk)
@@ -134,6 +120,28 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 	}
 }
 
+func (s *ShareService) connectToRemote(nodeId string, port int) (*net.TCPConn, error) {
+	id, err := uuid.Parse(nodeId)
+	if err != nil {
+		return nil, err
+	}
+	node, ok := s.nodes[id]
+	if !ok {
+		return nil, errors.New("Download failed, node not found")
+	}
+
+	var tcpConn *net.TCPConn
+	for _, ip := range node.Ips() {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf(ip, port), socketTimeout)
+		tcpConn = conn.(*net.TCPConn)
+		if err != nil {
+			return nil, err
+		}
+		break
+	}
+	return tcpConn, nil
+}
+
 func (s *ShareService) downloadFail(chunk *localData.Chunk) {
 	// todo: implement
 }
@@ -142,16 +150,16 @@ func (s *ShareService) downloadSuccess(sf data.SharedFile, chunk *localData.Chun
 	// todo: implement
 }
 
-func (s *ShareService) receiveData(conn *net.TCPConn, filePath string, chunk *localData.Chunk) (checksum string, err error) {
-	// create directory structure
-	path := path.Dir(filePath)
+func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, err error) {
+	// create directory structure including download directory
+	path := path.Dir(path.Join(s.downloadDir, sf.FileRelativePath()))
 	err = os.MkdirAll(path, os.ModeDir)
 	if err != nil {
 		return checksum, err
 	}
 
 	// write data to file
-	file, err := os.Open(filePath)
+	file, err := os.Open(path)
 	if err != nil {
 		return checksum, err
 	}
