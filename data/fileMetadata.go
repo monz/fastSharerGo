@@ -56,11 +56,6 @@ func (f FileMetadata) Chunks() []*Chunk {
 	return f.FileChunks
 }
 
-func (f FileMetadata) IsChunkLocal(checksum string) bool {
-	// todo: implement
-	return false
-}
-
 func (f FileMetadata) Checksum() string {
 	return f.FileChecksum
 }

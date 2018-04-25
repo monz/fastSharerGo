@@ -1,7 +1,6 @@
 package data
 
 import (
-	"log"
 	"math"
 	"sync"
 )
@@ -101,12 +100,6 @@ func (c Chunk) Size() int64 {
 
 func (c Chunk) HasChecksum() bool {
 	return len(c.ChunkChecksum) > 0
-}
-
-func (c Chunk) RequestAnswered() {
-	// todo: implement
-	log.Println("requestAnswered is not implemented!")
-	// waitSince = -1
 }
 
 func ChunkCount(fileSize int64) int {

@@ -182,15 +182,12 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 			log.Println("Received download request result from other client")
 			n.receivedDownloadRequestResult(cmd.Data())
 			printCmd(*cmd)
-			// todo: implement
 		case data.PushShareListCmd:
 			log.Println("Received share list from other client")
 			n.receivedShareList(cmd.Data())
 			printCmd(*cmd)
-			// todo: implement
 		default:
 			log.Println("Unknown command!")
-			time.Sleep(2 * time.Second) // only for debugging
 		}
 	}
 }

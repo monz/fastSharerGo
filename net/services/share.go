@@ -322,7 +322,6 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 		log.Println("Waiting while acquiring download token...")
 		// limit request to maxDownload count
 		// take download token
-		// todo: add timeout with switch;select...??
 		<-s.maxDownloads
 		//defer func() { s.maxDownloads <- 1; log.Println("Released download token") }()
 		log.Println("Could aquire download token")
