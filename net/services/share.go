@@ -14,6 +14,8 @@ import (
 	"net"
 	"os"
 	"path"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,6 +35,7 @@ type ShareService struct {
 	maxDownloads      chan int
 	sharedFiles       map[string]*data.SharedFile
 	sender            chan data.ShareCommand
+	dirSplit          *regexp.Regexp
 	mu                sync.Mutex
 }
 
@@ -46,6 +49,7 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, downl
 	s.maxDownloads = initSema(maxDownloads)
 	s.sharedFiles = make(map[string]*data.SharedFile)
 	s.sender = sender
+	s.dirSplit = regexp.MustCompile("[/\\\\]")
 	// init random
 	rand.Seed(time.Now().UnixNano())
 
@@ -177,7 +181,8 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk 
 	filePath = s.downloadFilePath(sf, true)
 	log.Println("The download file path = ", filePath)
 	downloadDir := path.Dir(filePath)
-	err = os.MkdirAll(downloadDir, os.ModeDir)
+	log.Println("The download directory = ", downloadDir)
+	err = os.MkdirAll(downloadDir, 0755)
 	if err != nil {
 		return checksum, filePath, err
 	}
@@ -445,10 +450,11 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remot
 }
 
 func (s *ShareService) downloadFilePath(sf data.SharedFile, withExtension bool) string {
-	filePath := path.Join(s.downloadDir, sf.FileRelativePath())
+	filePath := path.Join(s.downloadDir, strings.Join(s.dirSplit.Split(sf.FileRelativePath(), -1), string(os.PathSeparator)))
 	if withExtension {
 		filePath += s.downloadExtension
 	}
+	log.Println("THIS IS THE FILE PATH:", filePath)
 	return filePath
 }
 
