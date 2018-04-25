@@ -86,10 +86,6 @@ func (c Chunk) Checksum() string {
 	return c.ChunkChecksum
 }
 
-func (c *Chunk) SetChecksum(checksum string) {
-	c.ChunkChecksum = checksum
-}
-
 func (c Chunk) Offset() int64 {
 	return c.ChunkOffset
 }

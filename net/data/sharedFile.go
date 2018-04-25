@@ -126,6 +126,18 @@ func (sf *SharedFile) AddChunk(chunk *data.Chunk) {
 	sf.FileMetadata.AddChunk(chunk)
 }
 
+func (sf *SharedFile) ClearReplicaNodes() {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	sf.FileReplicaNodes = make(map[uuid.UUID]*ReplicaNode)
+}
+
+func (sf *SharedFile) ClearChunksWithoutChecksum() {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	sf.FileMetadata.ClearChunksWithoutChecksum()
+}
+
 func (sf *SharedFile) Chunks() []*data.Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -146,6 +158,15 @@ func (sf *SharedFile) ChunksToDownload() []*data.Chunk {
 	}
 
 	return chunks
+}
+
+func (sf *SharedFile) SetAllChunksLocal(isLocal bool) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	for _, c := range sf.FileMetadata.Chunks() {
+		c.SetLocal(isLocal)
+	}
 }
 
 func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {

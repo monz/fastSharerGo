@@ -256,8 +256,23 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 		//sf = &consolidatedSf
 	} else {
 		// add
-		s.sharedFiles[remoteSf.FileId()] = &remoteSf
 		sf = &remoteSf
+		sf.ClearReplicaNodes()
+		for _, node := range remoteSf.ReplicaNodes() {
+			// skip localNode id
+			if node.Id() == s.localNodeId {
+				continue
+			}
+			// skip unknown node
+			_, ok := s.nodes[node.Id()]
+			if !ok {
+				continue
+			}
+			sf.AddReplicaNode(*node)
+		}
+		sf.ClearChunksWithoutChecksum()
+		log.Println("First added shared file has chunkCount = ", len(sf.Chunks()))
+		s.sharedFiles[sf.FileId()] = sf
 	}
 
 	filePath := s.downloadFilePath(*sf, false)
@@ -272,9 +287,7 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 			return
 		}
 		if isComplete {
-			for _, c := range sf.Chunks() {
-				c.SetLocal(true)
-			}
+			sf.SetAllChunksLocal(true)
 		}
 	}
 	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", isExisting, isComplete)
@@ -440,10 +453,10 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remot
 	}
 	// add new chunk information
 	for _, remoteChunk := range remoteSf.Chunks() {
-		_, ok := localSf.ChunkById(remoteChunk.Checksum())
-		if !ok {
-			localSf.AddChunk(remoteChunk)
+		if len(remoteChunk.Checksum()) <= 0 {
+			continue
 		}
+		localSf.AddChunk(remoteChunk)
 	}
 	return nil
 }

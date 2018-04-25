@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 	"log"
 	"os"
+	"sync"
 )
 
 // have to use exported members for JSON unmarshalling
@@ -15,6 +16,7 @@ type FileMetadata struct {
 	FileChunks       []*Chunk `json:"chunks"`
 	FileRelativePath string   `json:"relativePath"`
 	FilePath         string   `json:"filePath"`
+	mu               sync.Mutex
 }
 
 func NewFileMetadata(filePath string, relativePath string) *FileMetadata {
@@ -49,7 +51,32 @@ func (f FileMetadata) Name() string {
 }
 
 func (f *FileMetadata) AddChunk(chunk *Chunk) {
-	f.FileChunks = append(f.FileChunks, chunk)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	isAbsent := true
+	for _, c := range f.FileChunks {
+		if c.Checksum() == chunk.Checksum() {
+			isAbsent = false
+			break
+		}
+	}
+	if isAbsent {
+		f.FileChunks = append(f.FileChunks, chunk)
+	}
+}
+
+func (f *FileMetadata) ClearChunksWithoutChecksum() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var cleaned []*Chunk
+	for _, c := range f.FileChunks {
+		if len(c.Checksum()) > 0 {
+			cleaned = append(cleaned, c)
+		}
+	}
+
+	f.FileChunks = cleaned
 }
 
 func (f FileMetadata) Chunks() []*Chunk {
