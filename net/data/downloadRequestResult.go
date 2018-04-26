@@ -1,5 +1,7 @@
 package data
 
+const DenyDownload = -1
+
 type DownloadRequestResult struct {
 	RequestFileId        string `json:"fileId"`
 	RequestNodeId        string `json:"nodeId"`

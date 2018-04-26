@@ -175,9 +175,8 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 		switch cmd.Type() {
 		case data.DownloadRequestCmd:
 			log.Println("Received download request from other client")
-			n.receivedDownloadRequest()
+			n.receivedDownloadRequest(cmd.Data())
 			printCmd(*cmd)
-			// todo: implement
 		case data.DownloadRequestResultCmd:
 			log.Println("Received download request result from other client")
 			n.receivedDownloadRequestResult(cmd.Data())
@@ -192,15 +191,15 @@ func (n *NetworkService) handleConnection(conn net.Conn) {
 	}
 }
 
-func (n NetworkService) receivedDownloadRequest() {
-	log.Println("Current subscriber:", n.subscriber)
+func (n NetworkService) receivedDownloadRequest(l []interface{}) {
 	for _, s := range n.subscriber {
-		s.ReceivedDownloadRequest()
+		for _, v := range l {
+			s.ReceivedDownloadRequest(v.(data.DownloadRequest))
+		}
 	}
 }
 
 func (n NetworkService) receivedDownloadRequestResult(l []interface{}) {
-	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
 		for _, v := range l {
 			s.ReceivedDownloadRequestResult(v.(data.DownloadRequestResult))
@@ -209,9 +208,7 @@ func (n NetworkService) receivedDownloadRequestResult(l []interface{}) {
 }
 
 func (n NetworkService) receivedShareList(l []interface{}) {
-	log.Println("Current subscriber:", n.subscriber)
 	for _, s := range n.subscriber {
-		// update subscriber for all data list entries
 		for _, v := range l {
 			s.ReceivedShareList(v.(data.SharedFile))
 		}

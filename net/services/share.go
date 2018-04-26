@@ -22,8 +22,8 @@ import (
 
 const (
 	// already defined in network service
-	//socketTimeout = 10 * time.Second
-	bufferSize = 4096
+	tokenAcquireTimeout = 5 * time.Second
+	bufferSize          = 4096
 )
 
 type ShareService struct {
@@ -71,8 +71,142 @@ func (s ShareService) Stop() {
 }
 
 // implement shareSubscriber interface
-func (s ShareService) ReceivedDownloadRequest() {
+func (s *ShareService) ReceivedDownloadRequest(request data.DownloadRequest) {
 	log.Println("Added download request from other client")
+	go s.upload(request)
+}
+
+func (s *ShareService) upload(r data.DownloadRequest) {
+	// check if requested chunk is local
+	sf, ok := s.sharedFiles[r.FileId()]
+	if !ok {
+		s.denyUpload(r)
+		return
+	}
+	chunk, ok := sf.ChunkById(r.ChunkChecksum())
+	if !ok || !chunk.IsLocal() {
+		s.denyUpload(r)
+		return
+	}
+	// acquire upload token
+	log.Println("Waiting to acquire upload token...")
+	select {
+	case <-s.maxUploads:
+		log.Println("Could acquire upload token")
+		s.acceptUpload(r)
+	case <-time.After(tokenAcquireTimeout):
+		s.denyUpload(r)
+		return
+	}
+}
+
+func (s *ShareService) acceptUpload(r data.DownloadRequest) {
+	log.Println("Accept download request")
+	// open random port
+	l, err := net.ListenTCP("tcp", nil)
+	if err != nil {
+		log.Println(err)
+		s.uploadFail()
+		return
+	}
+	// send port information to other client
+	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), l.Addr().(*net.TCPAddr).Port)}
+	nodeId, err := uuid.Parse(r.NodeId())
+	if err != nil {
+		log.Println(err)
+		s.uploadFail()
+		return
+	}
+	cmd := data.NewShareCommand(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+		// could not send data
+		log.Println("Could not send download request result!")
+		s.uploadFail()
+		return
+	})
+	s.sender <- *cmd
+	// wait for other client to connect and upload chunk data
+	// set timeout
+	err = l.SetDeadline(time.Now().Add(socketTimeout))
+	if err != nil {
+		log.Println(err)
+		s.uploadFail()
+		return
+	}
+	// accept connection
+	conn, err := l.AcceptTCP()
+	if err != nil {
+		if err, ok := err.(*net.OpError); ok && err.Timeout() {
+			// connection timed out
+			log.Println("Connection timed out, other client did not connect within given time!")
+		}
+		log.Println(err)
+		s.uploadFail()
+		return
+	}
+	defer conn.Close()
+	// remote client accepted connection, disable timeout/deadline
+	l.SetDeadline(time.Time{})
+	// send data
+	err = s.sendData(conn, r.FileId(), r.ChunkChecksum())
+	if err != nil {
+		log.Println(err)
+		s.uploadFail()
+		return
+	}
+	// release upload token
+	s.uploadSuccess()
+}
+
+func (s *ShareService) denyUpload(r data.DownloadRequest) {
+	log.Println("Cannot accept download request")
+	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), data.DenyDownload)}
+	nodeId, err := uuid.Parse(r.NodeId())
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	cmd := data.NewShareCommand(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+		// could not send data
+		log.Println("Could not send download request result!")
+		return
+	})
+	s.sender <- *cmd
+}
+
+func (s *ShareService) sendData(conn *net.TCPConn, fileId string, chunkChecksum string) error {
+	sf, ok := s.sharedFiles[fileId]
+	if !ok {
+		return errors.New("Cannot send data, file not shared!")
+	}
+	chunk, ok := sf.ChunkById(chunkChecksum)
+	if !ok || !chunk.IsLocal() {
+		return errors.New("Cannot send data, requested chunk not available!")
+	}
+
+	// get file path to finished file, or currently downloading file with download extension
+	filePath := s.downloadFilePath(*sf, !sf.IsLocal())
+
+	// open file
+	file, err := os.Open(filePath)
+	defer file.Close()
+	if err != nil {
+		return err
+	}
+	// send data
+	sectionReader := io.NewSectionReader(file, chunk.Offset(), chunk.Size())
+	io.Copy(conn, sectionReader)
+
+	return nil
+}
+
+func (s *ShareService) uploadSuccess() {
+	log.Println("Release upload token")
+	s.maxUploads <- 1
+}
+
+func (s *ShareService) uploadFail() {
+	log.Println("Release upload token")
+	s.maxUploads <- 1
 }
 
 // implement shareSubscriber interface
@@ -157,6 +291,8 @@ func (s *ShareService) downloadFail(chunk *localData.Chunk) {
 }
 
 func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chunk, oldFilePath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	log.Printf("Download of chunk '%s' of file '%s' was successful\n", chunk.Checksum(), sf.FileId())
 	chunk.SetLocal(true)
 	chunk.DeactivateDownload()
@@ -228,9 +364,9 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk 
 
 func (s *ShareService) helperPrint() {
 	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
-	for key, _ := range s.sharedFiles {
-		log.Printf("ShareService contains file '%s':\n", key)
-	}
+	//for key, _ := range s.sharedFiles {
+	//	log.Printf("ShareService contains file '%s':\n", key)
+	//}
 }
 
 // implement shareSubscriber interface
