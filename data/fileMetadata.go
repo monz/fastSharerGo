@@ -136,3 +136,13 @@ func (f FileMetadata) ChunkById(chunkChecksum string) (chunk *Chunk, ok bool) {
 	}
 	return chunk, ok
 }
+
+func (f FileMetadata) LocalChunksChecksums() []string {
+	sums := make([]string, len(f.FileChunks))
+	for _, c := range f.FileChunks {
+		if c.IsLocal() {
+			sums = append(sums, c.Checksum())
+		}
+	}
+	return sums
+}

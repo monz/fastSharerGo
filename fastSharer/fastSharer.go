@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+var shareInfoPeriod time.Duration
 var downloadDir string
 var cmdPort int
 var discoveryPort int
@@ -16,6 +17,7 @@ var maxDownloads int
 var maxUploads int
 
 func init() {
+	flag.DurationVar(&shareInfoPeriod, "shareInfoPeriod", 5*time.Second, "number of seconds shared file info messages get send")
 	flag.StringVar(&downloadDir, "dir", "./", "download directory")
 	flag.IntVar(&cmdPort, "cmdPort", 6132, "port for share command messages")
 	flag.IntVar(&discoveryPort, "discoPort", 9942, "port for node discovery")
@@ -38,7 +40,7 @@ func main() {
 	// subscribe to node message updates from discovery service
 	discoService.Register(netService)
 
-	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), downloadDir, maxUploads, maxDownloads)
+	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), shareInfoPeriod, downloadDir, maxUploads, maxDownloads)
 	shareService.Start()
 	// subscribe to share message updates from network service
 	netService.Register(shareService)

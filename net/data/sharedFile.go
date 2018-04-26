@@ -34,7 +34,9 @@ func (sf SharedFile) FileRelativePath() string {
 	return sf.FileMetadata.RelativePath()
 }
 
-func (sf SharedFile) Checksum() string {
+func (sf *SharedFile) Checksum() string {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
 	return sf.FileMetadata.Checksum()
 }
 
@@ -64,6 +66,13 @@ func (sf SharedFile) FileId() string {
 
 func (sf SharedFile) ReplicaNodes() map[uuid.UUID]*ReplicaNode {
 	return sf.FileReplicaNodes
+}
+
+func (sf *SharedFile) ReplicaNodeById(id uuid.UUID) (ReplicaNode, bool) {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	replicaNode, ok := sf.FileReplicaNodes[id]
+	return *replicaNode, ok
 }
 
 func (sf *SharedFile) AddReplicaNode(newNode ReplicaNode) {
@@ -182,4 +191,8 @@ func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
 
 func (sf SharedFile) ChunkById(chunkChecksum string) (*data.Chunk, bool) {
 	return sf.FileMetadata.ChunkById(chunkChecksum)
+}
+
+func (sf SharedFile) LocalChunksChecksums() []string {
+	return sf.FileMetadata.LocalChunksChecksums()
 }

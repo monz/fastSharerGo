@@ -3,7 +3,6 @@ package data
 import (
 	"encoding/json"
 	"github.com/google/uuid"
-	"github.com/monz/fastSharerGo/data"
 	"sync"
 )
 
@@ -22,7 +21,7 @@ type replicaNode struct {
 	IsComplete bool      `json:"isComplete"`
 }
 
-func NewReplicaNode(id uuid.UUID, chunks []data.Chunk, isComplete bool) *ReplicaNode {
+func NewReplicaNode(id uuid.UUID, chunks []string, isComplete bool) *ReplicaNode {
 	node := new(ReplicaNode)
 	node.id = id
 	node.chunks = toMap(chunks)
@@ -73,11 +72,11 @@ func fromReplicaNode(node *ReplicaNode, id uuid.UUID, chunks []string, isComplet
 	return node
 }
 
-func toMap(chunks []data.Chunk) map[string]bool {
+func toMap(chunkChecksums []string) map[string]bool {
 	m := make(map[string]bool)
 
-	for _, c := range chunks {
-		m[c.Checksum()] = true
+	for _, c := range chunkChecksums {
+		m[c] = true
 	}
 	return m
 }
@@ -116,6 +115,9 @@ func (n ReplicaNode) IsStopSharedInfo() bool {
 	return n.isStopSharedInfo
 }
 
-func (n ReplicaNode) StopSharedInfo(stopSharedInfo bool) {
+func (n *ReplicaNode) SetStopSharedInfo(stopSharedInfo bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	n.isStopSharedInfo = stopSharedInfo
 }

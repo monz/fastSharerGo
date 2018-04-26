@@ -29,6 +29,7 @@ const (
 type ShareService struct {
 	localNodeId       uuid.UUID
 	nodes             map[uuid.UUID]*data.Node
+	infoPeriod        time.Duration
 	downloadDir       string
 	downloadExtension string
 	maxUploads        chan int
@@ -39,10 +40,11 @@ type ShareService struct {
 	mu                sync.Mutex
 }
 
-func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
+func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoPeriod time.Duration, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
 	s := new(ShareService)
 	s.localNodeId = localNodeId
 	s.nodes = make(map[uuid.UUID]*data.Node)
+	s.infoPeriod = infoPeriod
 	s.downloadDir = downloadDir
 	s.downloadExtension = ".part" // load from paramter
 	s.maxUploads = initSema(maxUploads)
@@ -64,10 +66,64 @@ func initSema(n int) chan int {
 	return channel
 }
 
-func (s ShareService) Start() {
+func (s *ShareService) Start() {
+	// start shared file info sender
+	go s.sendSharedFileInfo()
 }
 
-func (s ShareService) Stop() {
+func (s *ShareService) Stop() {
+	// todo: implement
+}
+
+func (s *ShareService) sendSharedFileInfo() {
+	log.Println("Starting info service for shared files")
+	for {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, sf := range s.sharedFiles {
+			for _, node := range s.nodes {
+				replicaNode, ok := sf.ReplicaNodeById(node.Id())
+				if !ok || !replicaNode.IsComplete() {
+					// send all information
+					// add local node as replica node for all local chunks
+					log.Println("Send shared files info message")
+					chunkSums := sf.LocalChunksChecksums()
+					sfCopy := *sf
+					localNode := data.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
+					sfCopy.AddReplicaNode(*localNode)
+
+					// send data
+					shareList := []interface{}{sfCopy}
+					cmd := data.NewShareCommand(data.PushShareListCmd, shareList, node.Id(), func() {
+						// could not send data
+						log.Println("Could not send share list data")
+						return
+					})
+					s.sender <- *cmd
+				} else {
+					// send 'complete state' message
+					log.Println("Send 'complete state message'")
+					// only send complete message once
+					replicaNode.SetStopSharedInfo(true)
+					// send information that node is complete
+					sfCopy := *sf
+					localNode := data.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
+					sfCopy.AddReplicaNode(*localNode)
+
+					// send data
+					shareList := []interface{}{sfCopy}
+					cmd := data.NewShareCommand(data.PushShareListCmd, shareList, node.Id(), func() {
+						// could not send data
+						log.Println("Could not send complete message")
+						return
+					})
+					s.sender <- *cmd
+				}
+			}
+		}
+		// wait
+		time.Sleep(s.infoPeriod)
+	}
 }
 
 // implement shareSubscriber interface
@@ -382,14 +438,11 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 			return
 		}
 		// update
-		//consolidatedSf, err := s.consolidateSharedFileInfo(remoteSf)
 		err := s.consolidateSharedFileInfo(sf, remoteSf)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		//s.sharedFiles[consolidatedSf.FileId()] = &consolidatedSf
-		//sf = &consolidatedSf
 	} else {
 		// add
 		sf = &remoteSf
