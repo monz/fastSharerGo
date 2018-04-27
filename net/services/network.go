@@ -96,6 +96,7 @@ func (n *NetworkService) sendCommand(cmd data.ShareCommand) {
 			log.Println(err)
 			continue
 		}
+		log.Printf("Send command: '%s'", data)
 		log.Println("Command was actually sent!")
 		successfullySend = true
 	}

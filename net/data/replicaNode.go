@@ -62,10 +62,7 @@ func toReplicaNode(n ReplicaNode) replicaNode {
 func fromReplicaNode(node *ReplicaNode, id uuid.UUID, chunks []string, isComplete bool) *ReplicaNode {
 	node.id = id
 
-	m := make(map[string]bool)
-	for _, c := range chunks {
-		m[c] = true
-	}
+	m := toMap(chunks)
 	node.chunks = m
 	node.isComplete = isComplete
 
@@ -76,7 +73,9 @@ func toMap(chunkChecksums []string) map[string]bool {
 	m := make(map[string]bool)
 
 	for _, c := range chunkChecksums {
-		m[c] = true
+		if len(c) > 0 {
+			m[c] = true
+		}
 	}
 	return m
 }
@@ -88,6 +87,11 @@ func (n ReplicaNode) Id() uuid.UUID {
 func (n *ReplicaNode) PutIfAbsent(chunkChecksum string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	// skip empty checksum
+	if len(chunkChecksum) <= 0 {
+		return false
+	}
 
 	absent := false
 	_, ok := n.chunks[chunkChecksum]
@@ -104,6 +108,10 @@ func (n *ReplicaNode) Chunks() map[string]bool {
 
 func (n ReplicaNode) IsComplete() bool {
 	return n.isComplete
+}
+
+func (n *ReplicaNode) SetIsComplete(isComplete bool) {
+	n.isComplete = isComplete
 }
 
 func (n ReplicaNode) Contains(chunkChecksum string) bool {

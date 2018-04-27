@@ -79,11 +79,10 @@ func (s *ShareService) sendSharedFileInfo() {
 	log.Println("Starting info service for shared files")
 	for {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		for _, sf := range s.sharedFiles {
 			for _, node := range s.nodes {
 				replicaNode, ok := sf.ReplicaNodeById(node.Id())
-				if !ok || !replicaNode.IsComplete() {
+				if ok || !replicaNode.IsComplete() {
 					// send all information
 					// add local node as replica node for all local chunks
 					log.Println("Send shared files info message")
@@ -100,7 +99,7 @@ func (s *ShareService) sendSharedFileInfo() {
 						return
 					})
 					s.sender <- *cmd
-				} else {
+				} else if len(sf.Checksum()) > 0 && !replicaNode.IsStopSharedInfo() {
 					// send 'complete state' message
 					log.Println("Send 'complete state message'")
 					// only send complete message once
@@ -121,6 +120,7 @@ func (s *ShareService) sendSharedFileInfo() {
 				}
 			}
 		}
+		s.mu.Unlock()
 		// wait
 		time.Sleep(s.infoPeriod)
 	}
@@ -634,6 +634,8 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remot
 		if !ok {
 			continue
 		}
+		// copy complete state
+		node.SetIsComplete(node.IsComplete())
 		localSf.AddReplicaNode(*node)
 	}
 	// update shared file checksum

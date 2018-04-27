@@ -72,7 +72,12 @@ func (sf *SharedFile) ReplicaNodeById(id uuid.UUID) (ReplicaNode, bool) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	replicaNode, ok := sf.FileReplicaNodes[id]
-	return *replicaNode, ok
+	var nodeCopy ReplicaNode
+	if ok {
+		nodeCopy = *replicaNode
+	}
+
+	return nodeCopy, ok
 }
 
 func (sf *SharedFile) AddReplicaNode(newNode ReplicaNode) {
