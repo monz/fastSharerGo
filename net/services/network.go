@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
 	"net"
@@ -211,7 +212,7 @@ func (n NetworkService) receivedDownloadRequestResult(l []interface{}) {
 func (n NetworkService) receivedShareList(l []interface{}) {
 	for _, s := range n.subscriber {
 		for _, v := range l {
-			s.ReceivedShareList(v.(data.SharedFile))
+			s.ReceivedShareList(v.(commonData.SharedFile))
 		}
 	}
 }

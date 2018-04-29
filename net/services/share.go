@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	localData "github.com/monz/fastSharerGo/data"
+	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
 	"log"
@@ -34,7 +34,7 @@ type ShareService struct {
 	downloadExtension string
 	maxUploads        chan int
 	maxDownloads      chan int
-	sharedFiles       map[string]*data.SharedFile
+	sharedFiles       map[string]*commonData.SharedFile
 	sender            chan data.ShareCommand
 	dirSplit          *regexp.Regexp
 	mu                sync.Mutex
@@ -49,7 +49,7 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.downloadExtension = ".part" // load from paramter
 	s.maxUploads = initSema(maxUploads)
 	s.maxDownloads = initSema(maxDownloads)
-	s.sharedFiles = make(map[string]*data.SharedFile)
+	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = sender
 	s.dirSplit = regexp.MustCompile("[/\\\\]")
 	// init random
@@ -88,7 +88,7 @@ func (s *ShareService) sendSharedFileInfo() {
 					log.Println("Send shared files info message")
 					chunkSums := sf.LocalChunksChecksums()
 					sfCopy := *sf
-					localNode := data.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
+					localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
 					sfCopy.AddReplicaNode(*localNode)
 
 					// send data
@@ -106,7 +106,7 @@ func (s *ShareService) sendSharedFileInfo() {
 					replicaNode.SetStopSharedInfo(true)
 					// send information that node is complete
 					sfCopy := *sf
-					localNode := data.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
+					localNode := commonData.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
 					sfCopy.AddReplicaNode(*localNode)
 
 					// send data
@@ -336,7 +336,7 @@ func (s *ShareService) connectToRemote(nodeId string, port int) (*net.TCPConn, e
 	return tcpConn, nil
 }
 
-func (s *ShareService) downloadFail(chunk *localData.Chunk) {
+func (s *ShareService) downloadFail(chunk *commonData.Chunk) {
 	if chunk != nil {
 		log.Printf("Download of chunk '%s' failed.", chunk.Checksum())
 		chunk.DeactivateDownload()
@@ -346,7 +346,7 @@ func (s *ShareService) downloadFail(chunk *localData.Chunk) {
 	log.Println("Released download token")
 }
 
-func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chunk, oldFilePath string) {
+func (s *ShareService) downloadSuccess(sf *commonData.SharedFile, chunk *commonData.Chunk, oldFilePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("Download of chunk '%s' of file '%s' was successful\n", chunk.Checksum(), sf.FileId())
@@ -368,7 +368,7 @@ func (s *ShareService) downloadSuccess(sf *data.SharedFile, chunk *localData.Chu
 	log.Println("Released download token")
 }
 
-func (s *ShareService) receiveData(conn *net.TCPConn, sf data.SharedFile, chunk *localData.Chunk) (checksum string, filePath string, err error) {
+func (s *ShareService) receiveData(conn *net.TCPConn, sf commonData.SharedFile, chunk *commonData.Chunk) (checksum string, filePath string, err error) {
 	// create directory structure including download directory
 	filePath = s.downloadFilePath(sf, true)
 	log.Println("The download file path = ", filePath)
@@ -426,7 +426,7 @@ func (s *ShareService) helperPrint() {
 }
 
 // implement shareSubscriber interface
-func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
+func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	log.Println("Added shared file from other client")
 	s.helperPrint()
 	// add/update share file list
@@ -512,7 +512,7 @@ func (s *ShareService) ReceivedShareList(remoteSf data.SharedFile) {
 	go s.requestDownload(sf, 0)
 }
 
-func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Duration) {
+func (s *ShareService) requestDownload(sf *commonData.SharedFile, initialDelay time.Duration) {
 	log.Printf("Request download for sharedFile %p\n", sf)
 	// delay download request
 	time.Sleep(initialDelay * time.Millisecond)
@@ -574,7 +574,7 @@ func (s *ShareService) requestDownload(sf *data.SharedFile, initialDelay time.Du
 	}
 }
 
-func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid.UUID, chunk *localData.Chunk, err error) {
+func (s *ShareService) nextDownloadInformation(sf *commonData.SharedFile) (nodeId uuid.UUID, chunk *commonData.Chunk, err error) {
 	// get all replica nodes holding information about remaining chunks to download
 	// select replica node which holds least shared information, to spread information
 	// more quickly in entire network
@@ -584,7 +584,7 @@ func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid
 		return nodeId, chunk, errors.New("Currently no chunks to download")
 	}
 
-	chunkDist := make(map[string][]data.ReplicaNode)
+	chunkDist := make(map[string][]commonData.ReplicaNode)
 	for _, c := range chunks {
 		log.Printf("In nextDownload chunk %p\n", c)
 		replicaNodes := sf.ReplicaNodesByChunk(c.Checksum())
@@ -622,7 +622,7 @@ func (s *ShareService) nextDownloadInformation(sf *data.SharedFile) (nodeId uuid
 	return nodeId, chunk, nil
 }
 
-func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remoteSf data.SharedFile) error {
+func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf commonData.SharedFile) error {
 	// add replica nodes
 	for _, node := range remoteSf.ReplicaNodes() {
 		// skip localNode id
@@ -652,7 +652,7 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *data.SharedFile, remot
 	return nil
 }
 
-func (s *ShareService) downloadFilePath(sf data.SharedFile, withExtension bool) string {
+func (s *ShareService) downloadFilePath(sf commonData.SharedFile, withExtension bool) string {
 	filePath := path.Join(s.downloadDir, strings.Join(s.dirSplit.Split(sf.FileRelativePath(), -1), string(os.PathSeparator)))
 	if withExtension {
 		filePath += s.downloadExtension
@@ -671,7 +671,7 @@ func fileExists(filePath string) bool {
 	return exists
 }
 
-func fileComplete(filePath string, checksum string, chunks []*localData.Chunk) (bool, error) {
+func fileComplete(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
 	// open file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -719,4 +719,9 @@ func (s *ShareService) RemoveNode(node data.Node) {
 	defer s.mu.Unlock()
 
 	delete(s.nodes, node.Id())
+}
+
+// implement directoryChangeSubscriber interface
+func (s *ShareService) AddLocalSharedFile(sf commonData.SharedFile) {
+	log.Println("Received info of local file:", sf)
 }

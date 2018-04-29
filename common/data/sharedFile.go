@@ -2,19 +2,18 @@ package data
 
 import (
 	"github.com/google/uuid"
-	"github.com/monz/fastSharerGo/data"
 	"log"
 	"sync"
 )
 
 type SharedFile struct {
-	FileMetadata     data.FileMetadata          `json:"metadata"`
+	FileMetadata     FileMetadata               `json:"metadata"`
 	FileReplicaNodes map[uuid.UUID]*ReplicaNode `json:"replicaNodes"`
 	downloadActive   bool
 	mu               sync.Mutex
 }
 
-func NewSharedFile(metadata data.FileMetadata) *SharedFile {
+func NewSharedFile(metadata FileMetadata) *SharedFile {
 	sf := new(SharedFile)
 	sf.FileMetadata = metadata
 	sf.FileReplicaNodes = make(map[uuid.UUID]*ReplicaNode)
@@ -48,7 +47,7 @@ func (sf *SharedFile) SetChecksum(checksum string) {
 
 func (sf SharedFile) IsLocal() bool {
 	var isLocal bool
-	expectedChunkCount := data.ChunkCount(sf.FileMetadata.Size())
+	expectedChunkCount := ChunkCount(sf.FileMetadata.Size())
 	actualChunkCount := len(sf.FileMetadata.Chunks())
 	log.Printf("In isLocal: expectedChunkCount = %d, actualChunkCount = %d\n", expectedChunkCount, actualChunkCount)
 	if actualChunkCount > 0 && actualChunkCount == expectedChunkCount {
@@ -134,7 +133,7 @@ func (sf *SharedFile) IsDownloadActive() bool {
 	return sf.downloadActive
 }
 
-func (sf *SharedFile) AddChunk(chunk *data.Chunk) {
+func (sf *SharedFile) AddChunk(chunk *Chunk) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	sf.FileMetadata.AddChunk(chunk)
@@ -152,17 +151,17 @@ func (sf *SharedFile) ClearChunksWithoutChecksum() {
 	sf.FileMetadata.ClearChunksWithoutChecksum()
 }
 
-func (sf *SharedFile) Chunks() []*data.Chunk {
+func (sf *SharedFile) Chunks() []*Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.FileMetadata.Chunks()
 }
 
-func (sf *SharedFile) ChunksToDownload() []*data.Chunk {
+func (sf *SharedFile) ChunksToDownload() []*Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	var chunks []*data.Chunk
+	var chunks []*Chunk
 	if len(sf.FileMetadata.Chunks()) > 0 && !sf.IsLocal() {
 		for _, c := range sf.FileMetadata.Chunks() {
 			if !c.IsLocal() && !c.IsDownloadActive() && len(c.Checksum()) > 0 {
@@ -194,7 +193,7 @@ func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {
 	return replicaNodes
 }
 
-func (sf SharedFile) ChunkById(chunkChecksum string) (*data.Chunk, bool) {
+func (sf SharedFile) ChunkById(chunkChecksum string) (*Chunk, bool) {
 	return sf.FileMetadata.ChunkById(chunkChecksum)
 }
 

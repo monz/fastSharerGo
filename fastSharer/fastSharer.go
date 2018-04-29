@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/monz/fastSharerGo/local/services"
 	nnet "github.com/monz/fastSharerGo/net/services"
 	"sync"
 	"time"
@@ -10,6 +11,8 @@ import (
 
 var shareInfoPeriod time.Duration
 var downloadDir string
+var shareDir string
+var shareDirRecursive bool
 var cmdPort int
 var discoveryPort int
 var discoveryPeriod time.Duration
@@ -18,7 +21,9 @@ var maxUploads int
 
 func init() {
 	flag.DurationVar(&shareInfoPeriod, "shareInfoPeriod", 5*time.Second, "number of seconds shared file info messages get send")
-	flag.StringVar(&downloadDir, "dir", "./", "download directory")
+	flag.StringVar(&downloadDir, "downloadDir", "./", "download directory")
+	flag.StringVar(&shareDir, "shareDir", "./share", "shared files directory")
+	flag.BoolVar(&shareDirRecursive, "recursive", true, "recursively watch shared files directory")
 	flag.IntVar(&cmdPort, "cmdPort", 6132, "port for share command messages")
 	flag.IntVar(&discoveryPort, "discoPort", 9942, "port for node discovery")
 	flag.DurationVar(&discoveryPeriod, "discoPeriod", 5*time.Second, "number of seconds discovery messages get send")
@@ -46,6 +51,11 @@ func main() {
 	netService.Register(shareService)
 	// subscribe to node message updates from dicovery service
 	discoService.Register(shareService)
+
+	fileDiscoService := local.NewFileDiscoveryService(shareDir, shareDirRecursive)
+	fileDiscoService.Start()
+	// subscribe to file change updates from file discovery service
+	fileDiscoService.Register(shareService)
 
 	// future: open 'shell' to handle sharer control commands from command line
 	// intermediate solution, blocking call

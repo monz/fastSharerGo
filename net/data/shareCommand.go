@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/monz/fastSharerGo/common/data"
 	"log"
 )
 
@@ -145,7 +146,7 @@ func DeserializeShareCommand(b []byte, c *ShareCommand) error {
 	for _, rawMessage := range dataElements {
 		switch c.Type() {
 		case PushShareListCmd:
-			var v SharedFile
+			var v data.SharedFile
 			err := json.Unmarshal(*rawMessage, &v)
 			if err != nil {
 				return err
