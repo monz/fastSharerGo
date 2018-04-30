@@ -42,7 +42,6 @@ func (c *Chunk) SetLocal(isLocal bool) {
 	c.isLocal = isLocal
 }
 
-// use semaphores to make method atomic!!!
 func (c *Chunk) ActivateDownload() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,7 +56,6 @@ func (c *Chunk) ActivateDownload() bool {
 	return success
 }
 
-// use semaphores to make method atomic!!!
 func (c *Chunk) DeactivateDownload() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -84,6 +82,12 @@ func (c Chunk) IsLocal() bool {
 
 func (c Chunk) Checksum() string {
 	return c.ChunkChecksum
+}
+
+func (c *Chunk) SetChecksum(checksum string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ChunkChecksum = checksum
 }
 
 func (c Chunk) Offset() int64 {

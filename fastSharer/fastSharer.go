@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"github.com/monz/fastSharerGo/local/services"
 	nnet "github.com/monz/fastSharerGo/net/services"
+	"log"
 	"sync"
 	"time"
 )
@@ -34,7 +34,7 @@ func init() {
 // todo: load all settings from config file or cmd line
 func main() {
 	flag.Parse()
-	fmt.Println("Starting fastSharer...")
+	log.Println("Starting fastSharer...")
 
 	// start services
 	discoService := nnet.NewDiscoveryService(discoveryPort, 0, discoveryPeriod)
@@ -53,9 +53,10 @@ func main() {
 	discoService.Register(shareService)
 
 	fileDiscoService := local.NewFileDiscoveryService(shareDir, shareDirRecursive)
-	fileDiscoService.Start()
 	// subscribe to file change updates from file discovery service
+	// register subscriber before start, because they get directly informed when services starts
 	fileDiscoService.Register(shareService)
+	fileDiscoService.Start()
 
 	// future: open 'shell' to handle sharer control commands from command line
 	// intermediate solution, blocking call

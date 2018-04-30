@@ -1,11 +1,11 @@
 package net
 
 import (
-	"crypto/md5"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
+	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
 	"log"
@@ -47,8 +47,8 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.infoPeriod = infoPeriod
 	s.downloadDir = downloadDir
 	s.downloadExtension = ".part" // load from paramter
-	s.maxUploads = initSema(maxUploads)
-	s.maxDownloads = initSema(maxDownloads)
+	s.maxUploads = util.InitSema(maxUploads)
+	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = sender
 	s.dirSplit = regexp.MustCompile("[/\\\\]")
@@ -56,14 +56,6 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	rand.Seed(time.Now().UnixNano())
 
 	return s
-}
-
-func initSema(n int) chan int {
-	channel := make(chan int, n)
-	for i := 0; i < n; i++ {
-		channel <- 1
-	}
-	return channel
 }
 
 func (s *ShareService) Start() {
@@ -404,7 +396,7 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf commonData.SharedFile, 
 	}
 
 	// prepare message digest
-	hash := md5.New()
+	hash := util.NewHash()
 
 	// simultaneously download, write to file, calculate checksum
 	multiWriter := io.MultiWriter(file, hash)
@@ -658,6 +650,8 @@ func (s *ShareService) downloadFilePath(sf commonData.SharedFile, withExtension 
 		filePath += s.downloadExtension
 	}
 	log.Println("THIS IS THE FILE PATH:", filePath)
+	log.Println("THIS IS THE REGULAR FILE PATH:", sf.FilePath())
+	log.Println("THIS IS THE REGULAR RELATIVE FILE PATH:", sf.FileRelativePath())
 	return filePath
 }
 
@@ -672,26 +666,15 @@ func fileExists(filePath string) bool {
 }
 
 func fileComplete(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
-	// open file
-	file, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-	completeHash := md5.New()
+	checksums := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		// jump to offset
-		sectionReader := io.NewSectionReader(file, chunk.Offset(), chunk.Size())
-		// calculate checksum
-		hash := md5.New()
-		_, err = io.Copy(hash, sectionReader)
+		checksum, err := util.CalculateChecksum(filePath, chunk.Offset(), chunk.Size())
 		if err != nil {
 			return false, err
 		}
-
-		io.WriteString(completeHash, fmt.Sprintf("%x", hash.Sum(nil)))
+		checksums = append(checksums, checksum)
 	}
-	calculatedChecksum := fmt.Sprintf("%x", completeHash.Sum(nil))
+	calculatedChecksum := util.SumOfChecksums(checksums)
 
 	log.Printf("FileComplete: expectedSum = %s, actualSum = %s\n", checksum, calculatedChecksum)
 	return checksum == calculatedChecksum, nil
@@ -722,6 +705,24 @@ func (s *ShareService) RemoveNode(node data.Node) {
 }
 
 // implement directoryChangeSubscriber interface
-func (s *ShareService) AddLocalSharedFile(sf commonData.SharedFile) {
-	log.Println("Received info of local file:", sf)
+func (s *ShareService) AddLocalSharedFile(newSf commonData.SharedFile) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	log.Println("Received info of local file:", newSf)
+	// add to shared files
+	if !s.isSharedFile(newSf) {
+		s.sharedFiles[newSf.FileId()] = &newSf
+	}
+}
+
+func (s *ShareService) isSharedFile(newSf commonData.SharedFile) bool {
+	isShared := false
+
+	for _, sf := range s.sharedFiles {
+		if sf.FileId() == newSf.FileId() {
+			isShared = true
+			break
+		}
+	}
+	return isShared
 }

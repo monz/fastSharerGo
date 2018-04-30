@@ -99,7 +99,6 @@ func (sf *SharedFile) AddReplicaNode(newNode ReplicaNode) {
 	}
 }
 
-// use semaphores to make method atomic!!!
 func (sf *SharedFile) ActivateDownload() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -113,7 +112,6 @@ func (sf *SharedFile) ActivateDownload() bool {
 	return success
 }
 
-// use semaphores to make method atomic!!!
 func (sf *SharedFile) DeactivateDownload() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()

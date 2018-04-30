@@ -2,6 +2,7 @@ package data
 
 import (
 	"github.com/google/uuid"
+	"github.com/monz/fastSharerGo/common/services"
 	"log"
 	"os"
 	"sync"
@@ -42,8 +43,25 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 	f.FileName = fileInfo.Name()
 	f.FileSize = fileInfo.Size()
 	f.FileChunks = GetChunks(f.FileId, f.FileSize)
+	go f.calculateChecksums()
 
 	return f
+}
+
+func (f *FileMetadata) calculateChecksums() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	checksums := make([]string, 0, len(f.FileChunks))
+	for _, c := range f.FileChunks {
+		checksum, err := util.CalculateChecksum(f.FilePath, c.Offset(), c.Size())
+		if err != nil {
+			log.Fatal(err)
+		}
+		c.SetChecksum(checksum)
+		checksums = append(checksums, checksum)
+	}
+	f.FileChecksum = util.SumOfChecksums(checksums)
 }
 
 func (f FileMetadata) Name() string {
