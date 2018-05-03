@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
+	tools "github.com/monz/fastSharerGo/common/util"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
 	"log"
@@ -13,9 +14,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"path"
-	"regexp"
-	"strings"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -36,7 +35,6 @@ type ShareService struct {
 	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
 	sender            chan data.ShareCommand
-	dirSplit          *regexp.Regexp
 	mu                sync.Mutex
 }
 
@@ -51,7 +49,6 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = sender
-	s.dirSplit = regexp.MustCompile("[/\\\\]")
 	// init random
 	rand.Seed(time.Now().UnixNano())
 
@@ -232,7 +229,10 @@ func (s *ShareService) sendData(conn *net.TCPConn, fileId string, chunkChecksum 
 	}
 
 	// get file path to finished file, or currently downloading file with download extension
-	filePath := s.downloadFilePath(*sf, !sf.IsLocal())
+	filePath, err := s.findPath(sf)
+	if err != nil {
+		return err
+	}
 
 	// open file
 	file, err := os.Open(filePath)
@@ -245,6 +245,29 @@ func (s *ShareService) sendData(conn *net.TCPConn, fileId string, chunkChecksum 
 	io.Copy(conn, sectionReader)
 
 	return nil
+}
+
+func (s *ShareService) findPath(sf *commonData.SharedFile) (string, error) {
+	// if file is local try to find file in 'shared' directories first
+	found := false
+	path := sf.FilePath()
+	if sf.IsLocal() {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			found = true
+		}
+	}
+	if found {
+		return path, nil
+	}
+	// else search file in download directory
+	path = s.downloadFilePath(*sf, !sf.IsLocal())
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		found = true
+	}
+	if found {
+		return path, nil
+	}
+	return path, errors.New("Cannot upload! File not found")
 }
 
 func (s *ShareService) uploadSuccess() {
@@ -347,7 +370,7 @@ func (s *ShareService) downloadSuccess(sf *commonData.SharedFile, chunk *commonD
 	// check whether file was completley downloaded
 	if sf.IsLocal() {
 		log.Printf("Rename file '%s' to finish download\n", sf.FileName())
-		err := os.Rename(oldFilePath, path.Join(path.Dir(oldFilePath), sf.FileName()))
+		err := os.Rename(oldFilePath, filepath.Join(filepath.Dir(oldFilePath), sf.FileName()))
 		if err != nil {
 			log.Println(err)
 		}
@@ -364,7 +387,7 @@ func (s *ShareService) receiveData(conn *net.TCPConn, sf commonData.SharedFile, 
 	// create directory structure including download directory
 	filePath = s.downloadFilePath(sf, true)
 	log.Println("The download file path = ", filePath)
-	downloadDir := path.Dir(filePath)
+	downloadDir := filepath.Dir(filePath)
 	log.Println("The download directory = ", downloadDir)
 	err = os.MkdirAll(downloadDir, 0755)
 	if err != nil {
@@ -439,17 +462,10 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 		// add
 		sf = &remoteSf
 		sf.ClearReplicaNodes()
-		for _, node := range remoteSf.ReplicaNodes() {
-			// skip localNode id
-			if node.Id() == s.localNodeId {
-				continue
-			}
-			// skip unknown node
-			_, ok := s.nodes[node.Id()]
-			if !ok {
-				continue
-			}
-			sf.AddReplicaNode(*node)
+		err := s.consolidateSharedFileInfo(sf, remoteSf)
+		if err != nil {
+			log.Println(err)
+			return
 		}
 		sf.ClearChunksWithoutChecksum()
 		log.Println("First added shared file has chunkCount = ", len(sf.Chunks()))
@@ -615,6 +631,9 @@ func (s *ShareService) nextDownloadInformation(sf *commonData.SharedFile) (nodeI
 }
 
 func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf commonData.SharedFile) error {
+	// clean paths
+	localSf.SetFilePath(tools.CleanPath(remoteSf.FilePath()))
+	localSf.SetFileRelativePath(tools.CleanPath(remoteSf.FileRelativePath()))
 	// add replica nodes
 	for _, node := range remoteSf.ReplicaNodes() {
 		// skip localNode id
@@ -645,7 +664,7 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 }
 
 func (s *ShareService) downloadFilePath(sf commonData.SharedFile, withExtension bool) string {
-	filePath := path.Join(s.downloadDir, strings.Join(s.dirSplit.Split(sf.FileRelativePath(), -1), string(os.PathSeparator)))
+	filePath := filepath.Join(s.downloadDir, sf.FileRelativePath())
 	if withExtension {
 		filePath += s.downloadExtension
 	}

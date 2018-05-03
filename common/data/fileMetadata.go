@@ -133,6 +133,10 @@ func (f FileMetadata) RelativePath() string {
 	return f.FileRelativePath
 }
 
+func (f *FileMetadata) SetFileRelativePath(relativePath string) {
+	f.FileRelativePath = relativePath
+}
+
 func (f FileMetadata) AllChunksLocal() bool {
 	allChunksLocal := true
 	for _, c := range f.FileChunks {

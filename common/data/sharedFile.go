@@ -29,8 +29,16 @@ func (sf SharedFile) FilePath() string {
 	return sf.FileMetadata.Path()
 }
 
+func (sf *SharedFile) SetFilePath(filePath string) {
+	sf.FileMetadata.SetFilePath(filePath)
+}
+
 func (sf SharedFile) FileRelativePath() string {
 	return sf.FileMetadata.RelativePath()
+}
+
+func (sf *SharedFile) SetFileRelativePath(filePath string) {
+	sf.FileMetadata.SetFileRelativePath(filePath)
 }
 
 func (sf *SharedFile) Checksum() string {

@@ -223,6 +223,8 @@ func (f *FileDiscoveryService) handleFile(path string, relativePath string) erro
 	info, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
 		return errors.New("File does not exist")
+	} else if err != nil {
+		return err
 	}
 	// do not handle directories
 	if info.IsDir() {
