@@ -23,6 +23,8 @@ type NetworkService struct {
 	localNodeId uuid.UUID
 	subscriber  []data.ShareSubscriber
 	sender      chan data.ShareCommand
+	cmdSocket   net.Listener
+	stopped     bool
 	mu          sync.Mutex
 }
 
@@ -32,6 +34,7 @@ func NewNetworkService(localId uuid.UUID, cmdPort int) *NetworkService {
 	n.cmdPort = cmdPort
 	n.localNodeId = localId
 	n.sender = make(chan data.ShareCommand)
+	n.stopped = false
 
 	return n
 }
@@ -140,19 +143,21 @@ func (n *NetworkService) Start() {
 	go n.send()
 }
 
-func (n NetworkService) Stop() {
-	// todo: implement
+func (n *NetworkService) Stop() {
+	n.stopped = true
+	n.cmdSocket.Close()
 }
 
 func (n *NetworkService) acceptConnections() {
-	cmdSocket, err := net.Listen("tcp", fmt.Sprintf(":%d", n.Port()))
+	var err error
+	n.cmdSocket, err = net.Listen("tcp", fmt.Sprintf(":%d", n.Port()))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer cmdSocket.Close()
+	// connection gets closed in 'Stop' function
 
-	for {
-		conn, err := cmdSocket.Accept()
+	for !n.stopped {
+		conn, err := n.cmdSocket.Accept()
 		if err != nil {
 			log.Println(err)
 			continue
@@ -224,6 +229,8 @@ func printCmd(cmd data.ShareCommand) {
 	}
 }
 
+// returns read shareCommand, scanner still holds data and error
+// if reached EOF, returns shareCommand=nil, moreData=false, error=EOF
 func readCommand(r *bufio.Scanner) (*data.ShareCommand, bool, error) {
 	var line string
 
@@ -244,5 +251,5 @@ func readCommand(r *bufio.Scanner) (*data.ShareCommand, bool, error) {
 			return nil, ok, err
 		}
 	}
-	return nil, true, errors.New("Could not read command")
+	return nil, false, errors.New("Reached EOF")
 }

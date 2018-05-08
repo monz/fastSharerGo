@@ -73,6 +73,9 @@ type ShareCommand struct {
 
 func NewEmptyShareCommand() *ShareCommand {
 	cmd := new(ShareCommand)
+	cmd.callback = func() {
+		log.Println("'Fail sending message' callback function should have been implemented!")
+	}
 
 	return cmd
 }
@@ -82,7 +85,13 @@ func NewShareCommand(cmdType Cmd, data []interface{}, destination uuid.UUID, cal
 	cmd.CmdType = cmdType
 	cmd.CmdData = data
 	cmd.destination = destination
-	cmd.callback = callback
+	if callback == nil {
+		cmd.callback = func() {
+			log.Println("'Fail sending message' callback function should have been implemented!")
+		}
+	} else {
+		cmd.callback = callback
+	}
 
 	return cmd
 }
@@ -136,6 +145,9 @@ func DeserializeShareCommand(b []byte, c *ShareCommand) error {
 	value, ok = objMap["data"]
 	if !ok {
 		return errors.New("Unrecognized message type")
+	}
+	if value == nil {
+		return errors.New("Received 'null' element")
 	}
 	err = json.Unmarshal(*value, &dataElements)
 	if err != nil {
