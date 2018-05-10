@@ -7,13 +7,13 @@ import (
 )
 
 type SharedFile struct {
-	FileMetadata     FileMetadata               `json:"metadata"`
+	FileMetadata     *FileMetadata              `json:"metadata"`
 	FileReplicaNodes map[uuid.UUID]*ReplicaNode `json:"replicaNodes"`
 	downloadActive   bool
 	mu               sync.Mutex
 }
 
-func NewSharedFile(metadata FileMetadata) *SharedFile {
+func NewSharedFile(metadata *FileMetadata) *SharedFile {
 	sf := new(SharedFile)
 	sf.FileMetadata = metadata
 	sf.FileReplicaNodes = make(map[uuid.UUID]*ReplicaNode)
@@ -75,26 +75,22 @@ func (sf SharedFile) ReplicaNodes() map[uuid.UUID]*ReplicaNode {
 	return sf.FileReplicaNodes
 }
 
-func (sf *SharedFile) ReplicaNodeById(id uuid.UUID) (ReplicaNode, bool) {
+func (sf *SharedFile) ReplicaNodeById(id uuid.UUID) (*ReplicaNode, bool) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	replicaNode, ok := sf.FileReplicaNodes[id]
-	var nodeCopy ReplicaNode
-	if ok {
-		nodeCopy = *replicaNode
-	}
 
-	return nodeCopy, ok
+	return replicaNode, ok
 }
 
-func (sf *SharedFile) AddReplicaNode(newNode ReplicaNode) {
+func (sf *SharedFile) AddReplicaNode(newNode *ReplicaNode) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
 	// put node if absent
 	node, ok := sf.FileReplicaNodes[newNode.Id()]
 	if !ok {
-		sf.FileReplicaNodes[newNode.Id()] = &newNode
+		sf.FileReplicaNodes[newNode.Id()] = newNode
 		return
 	}
 	// add new chunk checksums
@@ -161,6 +157,18 @@ func (sf *SharedFile) Chunks() []*Chunk {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.FileMetadata.Chunks()
+}
+
+func (sf *SharedFile) ChunkSums() []string {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	chunks := sf.FileMetadata.Chunks()
+	var sums = make([]string, 0, len(chunks))
+	for _, c := range chunks {
+		sums = append(sums, c.Checksum())
+	}
+	return sums
 }
 
 func (sf *SharedFile) ChunksToDownload() []*Chunk {

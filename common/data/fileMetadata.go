@@ -31,12 +31,8 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 	f.FilePath = filePath
 	f.FileRelativePath = relativePath
 
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err) // todo: handle error properly, don't stop programm
-	}
-	fileInfo, err := file.Stat()
-	if err != nil {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil && os.IsNotExist(err) {
 		log.Fatal(err) // todo: handle error properly, don't stop programm
 	}
 
@@ -59,6 +55,7 @@ func (f *FileMetadata) calculateChecksums() {
 			log.Fatal(err)
 		}
 		c.SetChecksum(checksum)
+		c.SetLocal(true)
 		checksums = append(checksums, checksum)
 	}
 	f.FileChecksum = util.SumOfChecksums(checksums)
@@ -160,7 +157,7 @@ func (f FileMetadata) ChunkById(chunkChecksum string) (chunk *Chunk, ok bool) {
 }
 
 func (f FileMetadata) LocalChunksChecksums() []string {
-	sums := make([]string, len(f.FileChunks))
+	sums := make([]string, 0, len(f.FileChunks))
 	for _, c := range f.FileChunks {
 		if c.IsLocal() {
 			sums = append(sums, c.Checksum())

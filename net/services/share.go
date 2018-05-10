@@ -35,6 +35,7 @@ type ShareService struct {
 	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
 	sender            chan data.ShareCommand
+	stopped           bool
 	mu                sync.Mutex
 }
 
@@ -49,6 +50,7 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = sender
+	s.stopped = false
 	// init random
 	rand.Seed(time.Now().UnixNano())
 
@@ -61,24 +63,25 @@ func (s *ShareService) Start() {
 }
 
 func (s *ShareService) Stop() {
-	// todo: implement
+	// stop sending shared file info messages
+	s.stopped = true
 }
 
 func (s *ShareService) sendSharedFileInfo() {
 	log.Println("Starting info service for shared files")
-	for {
+	for !s.stopped {
 		s.mu.Lock()
 		for _, sf := range s.sharedFiles {
 			for _, node := range s.nodes {
 				replicaNode, ok := sf.ReplicaNodeById(node.Id())
-				if ok || !replicaNode.IsComplete() {
+				if !ok || !replicaNode.IsAllInfoReceived() {
 					// send all information
 					// add local node as replica node for all local chunks
 					log.Println("Send shared files info message")
 					chunkSums := sf.LocalChunksChecksums()
 					sfCopy := *sf
 					localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
-					sfCopy.AddReplicaNode(*localNode)
+					sfCopy.AddReplicaNode(localNode)
 
 					// send data
 					shareList := []interface{}{sfCopy}
@@ -88,15 +91,15 @@ func (s *ShareService) sendSharedFileInfo() {
 						return
 					})
 					s.sender <- *cmd
-				} else if len(sf.Checksum()) > 0 && !replicaNode.IsStopSharedInfo() {
+				} else if len(sf.Checksum()) > 0 && !replicaNode.IsCompleteMsgSent() {
 					// send 'complete state' message
 					log.Println("Send 'complete state message'")
-					// only send complete message once
-					replicaNode.SetStopSharedInfo(true)
+					// only send complete message once, 'completeMsgSent' is internal state, does not get shared!
+					replicaNode.SetCompleteMsgSent(true)
 					// send information that node is complete
 					sfCopy := *sf
 					localNode := commonData.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
-					sfCopy.AddReplicaNode(*localNode)
+					sfCopy.AddReplicaNode(localNode)
 
 					// send data
 					shareList := []interface{}{sfCopy}
@@ -169,7 +172,7 @@ func (s *ShareService) acceptUpload(r data.DownloadRequest) {
 		return
 	})
 	s.sender <- *cmd
-	// wait for other client to connect and upload chunk data
+	// wait for other client to connect then upload chunk data
 	// set timeout
 	err = l.SetDeadline(time.Now().Add(socketTimeout))
 	if err != nil {
@@ -272,11 +275,15 @@ func (s *ShareService) findPath(sf *commonData.SharedFile) (string, error) {
 
 func (s *ShareService) uploadSuccess() {
 	log.Println("Release upload token")
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.maxUploads <- 1
 }
 
 func (s *ShareService) uploadFail() {
 	log.Println("Release upload token")
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.maxUploads <- 1
 }
 
@@ -352,6 +359,8 @@ func (s *ShareService) connectToRemote(nodeId string, port int) (*net.TCPConn, e
 }
 
 func (s *ShareService) downloadFail(chunk *commonData.Chunk) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if chunk != nil {
 		log.Printf("Download of chunk '%s' failed.", chunk.Checksum())
 		chunk.DeactivateDownload()
@@ -561,7 +570,7 @@ func (s *ShareService) requestDownload(sf *commonData.SharedFile, initialDelay t
 			if !chunk.DeactivateDownload() {
 				log.Println("Could not deactivate download of chunk", chunk.Checksum())
 			}
-			// releas download token
+			// release download token
 			s.downloadFail(nil)
 		})
 		s.sender <- *cmd
@@ -646,8 +655,8 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 			continue
 		}
 		// copy complete state
-		node.SetIsComplete(node.IsComplete())
-		localSf.AddReplicaNode(*node)
+		node.SetIsAllInfoReceived(node.IsAllInfoReceived())
+		localSf.AddReplicaNode(node)
 	}
 	// update shared file checksum
 	if len(localSf.Checksum()) <= 0 {

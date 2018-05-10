@@ -7,11 +7,11 @@ import (
 )
 
 type ReplicaNode struct {
-	id               uuid.UUID
-	chunks           map[string]bool
-	isComplete       bool
-	isStopSharedInfo bool
-	mu               sync.Mutex
+	id                uuid.UUID
+	chunks            map[string]bool
+	isAllInfoReceived bool
+	isCompleteMsgSent bool
+	mu                sync.Mutex
 }
 
 // type is only for marshalling/unmarshalling
@@ -21,11 +21,11 @@ type replicaNode struct {
 	IsComplete bool      `json:"isComplete"`
 }
 
-func NewReplicaNode(id uuid.UUID, chunks []string, isComplete bool) *ReplicaNode {
+func NewReplicaNode(id uuid.UUID, chunks []string, isAllInfoReceived bool) *ReplicaNode {
 	node := new(ReplicaNode)
 	node.id = id
 	node.chunks = toMap(chunks)
-	node.isComplete = isComplete
+	node.isAllInfoReceived = isAllInfoReceived
 
 	return node
 }
@@ -53,7 +53,7 @@ func toReplicaNode(n ReplicaNode) replicaNode {
 		slice = append(slice, c)
 	}
 	node.Chunks = slice
-	node.IsComplete = n.isComplete
+	node.IsComplete = n.isAllInfoReceived
 
 	return node
 }
@@ -64,7 +64,7 @@ func fromReplicaNode(node *ReplicaNode, id uuid.UUID, chunks []string, isComplet
 
 	m := toMap(chunks)
 	node.chunks = m
-	node.isComplete = isComplete
+	node.isAllInfoReceived = isComplete
 
 	return node
 }
@@ -106,12 +106,20 @@ func (n *ReplicaNode) Chunks() map[string]bool {
 	return n.chunks
 }
 
-func (n ReplicaNode) IsComplete() bool {
-	return n.isComplete
+func (n *ReplicaNode) ChunkCount() int {
+	return len(n.chunks)
 }
 
-func (n *ReplicaNode) SetIsComplete(isComplete bool) {
-	n.isComplete = isComplete
+func (n *ReplicaNode) IsAllInfoReceived() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.isAllInfoReceived
+}
+
+func (n *ReplicaNode) SetIsAllInfoReceived(isAllInfoReceived bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.isAllInfoReceived = isAllInfoReceived
 }
 
 func (n ReplicaNode) Contains(chunkChecksum string) bool {
@@ -119,13 +127,14 @@ func (n ReplicaNode) Contains(chunkChecksum string) bool {
 	return ok
 }
 
-func (n ReplicaNode) IsStopSharedInfo() bool {
-	return n.isStopSharedInfo
-}
-
-func (n *ReplicaNode) SetStopSharedInfo(stopSharedInfo bool) {
+func (n *ReplicaNode) IsCompleteMsgSent() bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	return n.isCompleteMsgSent
+}
 
-	n.isStopSharedInfo = stopSharedInfo
+func (n *ReplicaNode) SetCompleteMsgSent(completeMsgSent bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.isCompleteMsgSent = completeMsgSent
 }

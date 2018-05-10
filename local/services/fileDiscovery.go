@@ -232,7 +232,7 @@ func (f *FileDiscoveryService) handleFile(path string, relativePath string) erro
 	}
 	// create shared file object
 	fileMetadata := data.NewFileMetadata(path, relativePath)
-	sf := data.NewSharedFile(*fileMetadata)
+	sf := data.NewSharedFile(fileMetadata)
 
 	f.updateDirectoryChange(*sf)
 
