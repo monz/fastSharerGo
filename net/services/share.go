@@ -166,17 +166,10 @@ func (s *ShareService) downloadFilePath(sf *commonData.SharedFile, withExtension
 	return filePath
 }
 
-func (s *ShareService) helperPrint() {
-	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
-	//for key, _ := range s.sharedFiles {
-	//	log.Printf("ShareService contains file '%s':\n", key)
-	//}
-}
-
 // implement shareSubscriber interface
 func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	log.Println("Added shared file from other client")
-	s.helperPrint()
+	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
 	// add/update share file list
 	sf, ok := s.sharedFiles[remoteSf.FileId()]
 	if ok {
@@ -347,19 +340,8 @@ func (s *ShareService) AddLocalSharedFile(newSf commonData.SharedFile) {
 	defer s.mu.Unlock()
 	log.Println("Received info of local file:", newSf)
 	// add to shared files
-	if !s.isSharedFile(newSf) {
+	_, isShared := s.sharedFiles[newSf.FileId()]
+	if !isShared {
 		s.sharedFiles[newSf.FileId()] = &newSf
 	}
-}
-
-func (s *ShareService) isSharedFile(newSf commonData.SharedFile) bool {
-	isShared := false
-
-	for _, sf := range s.sharedFiles {
-		if sf.FileId() == newSf.FileId() {
-			isShared = true
-			break
-		}
-	}
-	return isShared
 }
