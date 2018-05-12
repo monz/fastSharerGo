@@ -35,6 +35,7 @@ type ShareService struct {
 	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
 	sender            chan data.ShareCommand
+	fileInfoer        FileInfoer
 	stopped           bool
 	mu                sync.Mutex
 }
@@ -50,6 +51,7 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = sender
+	s.fileInfoer = NewSharedFileInfoer(localNodeId, sender)
 	s.stopped = false
 	// init random
 	rand.Seed(time.Now().UnixNano())
@@ -75,40 +77,13 @@ func (s *ShareService) sendSharedFileInfo() {
 			for _, node := range s.nodes {
 				replicaNode, ok := sf.ReplicaNodeById(node.Id())
 				if !ok || !replicaNode.IsAllInfoReceived() {
-					// send all information
-					// add local node as replica node for all local chunks
 					log.Println("Send shared files info message")
-					chunkSums := sf.LocalChunksChecksums()
-					sfCopy := *sf
-					localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
-					sfCopy.AddReplicaNode(localNode)
-
-					// send data
-					shareList := []interface{}{sfCopy}
-					cmd := data.NewShareCommand(data.PushShareListCmd, shareList, node.Id(), func() {
-						// could not send data
-						log.Println("Could not send share list data")
-						return
-					})
-					s.sender <- *cmd
+					s.fileInfoer.SendFileInfo(*sf, node.Id())
 				} else if len(sf.Checksum()) > 0 && !replicaNode.IsCompleteMsgSent() {
-					// send 'complete state' message
 					log.Println("Send 'complete state message'")
 					// only send complete message once, 'completeMsgSent' is internal state, does not get shared!
 					replicaNode.SetCompleteMsgSent(true)
-					// send information that node is complete
-					sfCopy := *sf
-					localNode := commonData.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
-					sfCopy.AddReplicaNode(localNode)
-
-					// send data
-					shareList := []interface{}{sfCopy}
-					cmd := data.NewShareCommand(data.PushShareListCmd, shareList, node.Id(), func() {
-						// could not send data
-						log.Println("Could not send complete message")
-						return
-					})
-					s.sender <- *cmd
+					s.fileInfoer.SendCompleteMsg(*sf, node.Id())
 				}
 			}
 		}
@@ -476,7 +451,7 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 			log.Println(err)
 			return
 		}
-		sf.ClearChunksWithoutChecksum()
+		//sf.ClearChunksWithoutChecksum() // unnecessary due to consolidation
 		log.Println("First added shared file has chunkCount = ", len(sf.Chunks()))
 		s.sharedFiles[sf.FileId()] = sf
 	}
@@ -640,6 +615,7 @@ func (s *ShareService) nextDownloadInformation(sf *commonData.SharedFile) (nodeI
 }
 
 func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf commonData.SharedFile) error {
+	log.Println("Consolidate shared file information")
 	// clean paths
 	localSf.SetFilePath(tools.CleanPath(remoteSf.FilePath()))
 	localSf.SetFileRelativePath(tools.CleanPath(remoteSf.FileRelativePath()))
@@ -647,15 +623,17 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 	for _, node := range remoteSf.ReplicaNodes() {
 		// skip localNode id
 		if node.Id() == s.localNodeId {
+			log.Println("Skipped local node in replica node list:", node.Id())
 			continue
 		}
 		// skip unknown node
 		_, ok := s.nodes[node.Id()]
 		if !ok {
+			log.Println("Skipped replica node:", node.Id())
 			continue
 		}
 		// copy complete state
-		node.SetIsAllInfoReceived(node.IsAllInfoReceived())
+		//node.SetIsAllInfoReceived(node.IsAllInfoReceived()) // fix: this line does not make any sense
 		localSf.AddReplicaNode(node)
 	}
 	// update shared file checksum
@@ -667,6 +645,7 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 		if len(remoteChunk.Checksum()) <= 0 {
 			continue
 		}
+		log.Println("In Consolidate, chunk state:", remoteChunk.IsLocal())
 		localSf.AddChunk(remoteChunk)
 	}
 	return nil
@@ -677,9 +656,9 @@ func (s *ShareService) downloadFilePath(sf commonData.SharedFile, withExtension 
 	if withExtension {
 		filePath += s.downloadExtension
 	}
-	log.Println("THIS IS THE FILE PATH:", filePath)
-	log.Println("THIS IS THE REGULAR FILE PATH:", sf.FilePath())
-	log.Println("THIS IS THE REGULAR RELATIVE FILE PATH:", sf.FileRelativePath())
+	log.Println("THIS IS THE DOWNLOAD FILE PATH:", filePath)
+	log.Println("THIS IS THE SHARED FILE PATH:", sf.FilePath())
+	log.Println("THIS IS THE SHARED RELATIVE FILE PATH:", sf.FileRelativePath())
 	return filePath
 }
 
