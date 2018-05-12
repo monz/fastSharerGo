@@ -1,15 +1,12 @@
 package net
 
 import (
-	"errors"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
 	tools "github.com/monz/fastSharerGo/common/util"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
-	"math"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"sync"
@@ -51,11 +48,9 @@ func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, i
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = NewShareSender(senderChan)
 	s.uploader = NewShareUploader(localNodeId, s.maxUploads, s.sender)
-	s.downloader = NewShareDownloader(s.maxDownloads)
+	s.downloader = NewShareDownloader(localNodeId, s.maxDownloads, s.sender)
 	s.fileInfoer = NewSharedFileInfoer(localNodeId, s.sender)
 	s.stopped = false
-	// init random
-	rand.Seed(time.Now().UnixNano())
 
 	return s
 }
@@ -135,26 +130,26 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 	sf, ok := s.sharedFiles[rr.FileId()]
 	if !ok {
 		log.Println("Could not find shared file")
-		s.downloader.Fail(nil)
+		s.downloader.Fail()
 		return
 	}
 	chunk, ok := sf.ChunkById(rr.ChunkChecksum())
 	if !ok {
 		log.Println("Could not find chunk:", rr.ChunkChecksum())
-		s.downloader.Fail(nil)
+		s.downloader.Fail()
 		return
 	}
 	// check if remote node is still in node list
 	id, err := uuid.Parse(rr.NodeId())
 	if err != nil {
 		log.Println(err)
-		s.downloader.Fail(nil)
+		s.downloader.Fail()
 		return
 	}
 	node, ok := s.nodes[id]
 	if !ok {
 		log.Println("Download failed, node not found")
-		s.downloader.Fail(nil)
+		s.downloader.Fail()
 		return
 	}
 	s.downloader.Download(sf, chunk, node, rr.DownloadPort(), s.downloadFilePath(sf, true))
@@ -255,116 +250,9 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	}
 
 	// activate download
-	go s.requestDownload(sf, 0)
-}
-
-func (s *ShareService) requestDownload(sf *commonData.SharedFile, initialDelay time.Duration) {
-	log.Printf("Request download for sharedFile %p\n", sf)
-	// delay download request
-	time.Sleep(initialDelay * time.Millisecond)
-
-	// get list of all chunks still to download
-	chunkCount := len(sf.ChunksToDownload())
-	for chunkCount > 0 {
-		log.Printf("Remaining chunks to download: %d, for file %p\n", chunkCount, sf)
-		log.Println("Waiting while acquiring download token...")
-		// limit request to maxDownload count
-		// take download token
-		<-s.maxDownloads
-		//defer func() { s.maxDownloads <- 1; log.Println("Released download token") }()
-		log.Println("Could aquire download token")
-
-		//select node to download from
-		nodeId, chunk, err := s.nextDownloadInformation(sf)
-		if err != nil {
-			log.Println(err)
-			// reschedule download job
-			log.Println("Reschedule download job")
-			s.downloader.Fail(nil)
-			go s.requestDownload(sf, 500)
-			return
-		}
-
-		// mark chunk as currently downloading
-		if !chunk.ActivateDownload() {
-			log.Println("Chunk is already downloading")
-			s.downloader.Fail(nil)
-			continue
-		}
-
-		// send download request for chunk
-		request := []interface{}{data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum())}
-		s.sender.SendCallback(data.DownloadRequestCmd, request, nodeId, func() {
-			log.Println("Could not send message!")
-			if !chunk.DeactivateDownload() {
-				log.Println("Could not deactivate download of chunk", chunk.Checksum())
-			}
-			// release download token
-			s.downloader.Fail(nil)
-		})
-
-		// check whether new chunk information arrived
-		chunkCount = len(sf.ChunksToDownload())
-	}
-	// no more download information, check whether file is completely downloaded
-	if chunkCount <= 0 && !sf.IsLocal() {
-		log.Println("No chunks to download, but files is not local yet, waiting for more information!")
-		// reschedule download job
-		log.Println("Reschedule download job")
-		go s.requestDownload(sf, 1500) // todo: reduce time to 500ms
-		return
-	} else if chunkCount <= 0 && sf.IsLocal() {
-		log.Printf("Download of file '%s' finished.\n", sf.FileName())
-		return
-	}
-}
-
-func (s *ShareService) nextDownloadInformation(sf *commonData.SharedFile) (nodeId uuid.UUID, chunk *commonData.Chunk, err error) {
-	// get all replica nodes holding information about remaining chunks to download
-	// select replica node which holds least shared information, to spread information
-	// more quickly in entire network
-	// todo: implement; currently next chunk is randomly chosen
-	chunks := sf.ChunksToDownload()
-	if len(chunks) <= 0 {
-		return nodeId, chunk, errors.New("Currently no chunks to download")
-	}
-
-	chunkDist := make(map[string][]commonData.ReplicaNode)
-	for _, c := range chunks {
-		log.Printf("In nextDownload chunk %p\n", c)
-		replicaNodes := sf.ReplicaNodesByChunk(c.Checksum())
-		if len(replicaNodes) <= 0 {
-			continue
-		}
-		_, ok := chunkDist[c.Checksum()]
-		if !ok {
-			chunkDist[c.Checksum()] = replicaNodes
-		}
-	}
-	if len(chunkDist) <= 0 {
-		return nodeId, chunk, errors.New("Currently no replica nodes available")
-	}
-
-	minCount := math.MaxInt32
-	var chunkSum string
-	for chunkChecksum, replicaNodes := range chunkDist {
-		if len(replicaNodes) < minCount {
-			minCount = len(replicaNodes)
-			log.Println("Number of replica nodes:", minCount)
-			chunkSum = chunkChecksum
-			nodeId = replicaNodes[rand.Intn(len(replicaNodes))].Id()
-		}
-	}
-
-	// refactor 'nextDownloadInformation' function because of the following
-	// have to search for chunk object, there might be a better solution
-	for _, c := range chunks {
-		if c.Checksum() == chunkSum {
-			chunk = c
-			break
-		}
-	}
-	return nodeId, chunk, nil
+	// todo: think about maxDownload/maxUpload sema handling
+	// where to take the tokens, who holds the tokens...
+	go s.downloader.RequestDownload(sf, 0)
 }
 
 func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf commonData.SharedFile) error {

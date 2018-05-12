@@ -1,38 +1,158 @@
 package net
 
 import (
+	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Downloader interface {
+	RequestDownload(sf *commonData.SharedFile, initialDelay time.Duration)
 	Download(sf *commonData.SharedFile, chunk *commonData.Chunk, node *data.Node, downloadPort int, downloadPath string)
-	Fail(chunk *commonData.Chunk)
+	Fail()
 }
 
 type ShareDownloader struct {
+	localNodeId    uuid.UUID
 	downloadTokens chan int
+	sender         Sender
 }
 
-func NewShareDownloader(downloadTokens chan int) *ShareDownloader {
+func NewShareDownloader(localNodeId uuid.UUID, downloadTokens chan int, sender Sender) *ShareDownloader {
 	s := new(ShareDownloader)
+	s.localNodeId = localNodeId
 	s.downloadTokens = downloadTokens
+	s.sender = sender
+	// init random
+	rand.Seed(time.Now().UnixNano())
 
 	return s
+}
+
+func (s *ShareDownloader) RequestDownload(sf *commonData.SharedFile, initialDelay time.Duration) {
+	log.Printf("Request download for sharedFile %p\n", sf)
+	// delay download request
+	time.Sleep(initialDelay * time.Millisecond)
+
+	// get list of all chunks still to download
+	chunkCount := len(sf.ChunksToDownload())
+	for chunkCount > 0 {
+		log.Printf("Remaining chunks to download: %d, for file %p\n", chunkCount, sf)
+		log.Println("Waiting while acquiring download token...")
+		// limit request to maxDownload count
+		// take download token
+		<-s.downloadTokens
+		log.Println("Could aquire download token")
+
+		//select node to download from
+		nodeId, chunk, err := s.nextDownloadInformation(sf)
+		if err != nil {
+			log.Println(err)
+			// reschedule download job
+			log.Println("Reschedule download job")
+			s.downloadFail(nil)
+			go s.RequestDownload(sf, 500)
+			return
+		}
+
+		// mark chunk as currently downloading
+		if !chunk.ActivateDownload() {
+			log.Println("Chunk is already downloading")
+			s.downloadFail(nil)
+			continue
+		}
+
+		// send download request for chunk
+		request := []interface{}{data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum())}
+		s.sender.SendCallback(data.DownloadRequestCmd, request, nodeId, func() {
+			log.Println("Could not send message!")
+			if !chunk.DeactivateDownload() {
+				log.Println("Could not deactivate download of chunk", chunk.Checksum())
+			}
+			// release download token
+			s.downloadFail(nil)
+		})
+
+		// check whether new chunk information arrived
+		chunkCount = len(sf.ChunksToDownload())
+	}
+	// no more download information, check whether file is completely downloaded
+	if chunkCount <= 0 && !sf.IsLocal() {
+		log.Println("No chunks to download, but files is not local yet, waiting for more information!")
+		// reschedule download job
+		log.Println("Reschedule download job")
+		go s.RequestDownload(sf, 1500) // todo: reduce time to 500ms
+		return
+	} else if chunkCount <= 0 && sf.IsLocal() {
+		log.Printf("Download of file '%s' finished.\n", sf.FileName())
+		return
+	}
+}
+
+func (s *ShareDownloader) nextDownloadInformation(sf *commonData.SharedFile) (nodeId uuid.UUID, chunk *commonData.Chunk, err error) {
+	// get all replica nodes holding information about remaining chunks to download
+	// select replica node which holds least shared information, to spread information
+	// more quickly in entire network
+	// todo: implement; currently next chunk is randomly chosen
+	chunks := sf.ChunksToDownload()
+	if len(chunks) <= 0 {
+		return nodeId, chunk, errors.New("Currently no chunks to download")
+	}
+
+	chunkDist := make(map[string][]commonData.ReplicaNode)
+	for _, c := range chunks {
+		log.Printf("In nextDownload chunk %p\n", c)
+		replicaNodes := sf.ReplicaNodesByChunk(c.Checksum())
+		if len(replicaNodes) <= 0 {
+			continue
+		}
+		_, ok := chunkDist[c.Checksum()]
+		if !ok {
+			chunkDist[c.Checksum()] = replicaNodes
+		}
+	}
+	if len(chunkDist) <= 0 {
+		return nodeId, chunk, errors.New("Currently no replica nodes available")
+	}
+
+	minCount := math.MaxInt32
+	var chunkSum string
+	for chunkChecksum, replicaNodes := range chunkDist {
+		if len(replicaNodes) < minCount {
+			minCount = len(replicaNodes)
+			log.Println("Number of replica nodes:", minCount)
+			chunkSum = chunkChecksum
+			nodeId = replicaNodes[rand.Intn(len(replicaNodes))].Id()
+		}
+	}
+
+	// refactor 'nextDownloadInformation' function because of the following
+	// have to search for chunk object, there might be a better solution
+	for _, c := range chunks {
+		if c.Checksum() == chunkSum {
+			chunk = c
+			break
+		}
+	}
+	return nodeId, chunk, nil
 }
 
 func (s *ShareDownloader) Download(sf *commonData.SharedFile, chunk *commonData.Chunk, node *data.Node, downloadPort int, downloadPath string) {
 	// check if download was accepted
 	if downloadPort < 0 {
 		log.Printf("Download request of chunk '%s' was not accepted\n", chunk.Checksum())
-		s.Fail(chunk)
+		s.downloadFail(chunk)
 		return
 	}
 
@@ -41,7 +161,7 @@ func (s *ShareDownloader) Download(sf *commonData.SharedFile, chunk *commonData.
 	tcpConn, err := s.connectToRemote(*node, downloadPort)
 	if err != nil {
 		log.Println(err)
-		s.Fail(chunk)
+		s.downloadFail(chunk)
 		return
 	}
 	defer tcpConn.Close()
@@ -50,10 +170,10 @@ func (s *ShareDownloader) Download(sf *commonData.SharedFile, chunk *commonData.
 	checksum, filePath, err := s.receiveData(tcpConn, sf, chunk, downloadPath)
 	if err != nil {
 		log.Println(err)
-		s.Fail(chunk)
+		s.downloadFail(chunk)
 	} else if checksum != chunk.Checksum() {
 		log.Printf("Checksum of downloaded chunk does not match! Was '%s', expected '%s'\n", checksum, chunk.Checksum())
-		s.Fail(chunk)
+		s.downloadFail(chunk)
 	} else {
 		s.downloadSuccess(sf, chunk, filePath)
 	}
@@ -122,16 +242,6 @@ func (s *ShareDownloader) receiveData(conn *net.TCPConn, sf *commonData.SharedFi
 	return fmt.Sprintf("%x", hash.Sum(nil)), filePath, nil
 }
 
-func (s *ShareDownloader) Fail(chunk *commonData.Chunk) {
-	if chunk != nil {
-		log.Printf("Download of chunk '%s' failed.", chunk.Checksum())
-		chunk.DeactivateDownload()
-	}
-	// release download token
-	s.downloadTokens <- 1
-	log.Println("Released download token")
-}
-
 func (s *ShareDownloader) downloadSuccess(sf *commonData.SharedFile, chunk *commonData.Chunk, oldFilePath string) {
 	log.Printf("Download of chunk '%s' of file '%s' was successful\n", chunk.Checksum(), sf.FileId())
 	chunk.SetLocal(true)
@@ -150,4 +260,18 @@ func (s *ShareDownloader) downloadSuccess(sf *commonData.SharedFile, chunk *comm
 	// release download token
 	s.downloadTokens <- 1
 	log.Println("Released download token")
+}
+
+func (s *ShareDownloader) downloadFail(chunk *commonData.Chunk) {
+	if chunk != nil {
+		log.Printf("Download of chunk '%s' failed.", chunk.Checksum())
+		chunk.DeactivateDownload()
+	}
+	// release download token
+	s.downloadTokens <- 1
+	log.Println("Released download token")
+}
+
+func (s *ShareDownloader) Fail() {
+	s.downloadFail(nil)
 }
