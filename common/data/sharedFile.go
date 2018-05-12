@@ -10,6 +10,7 @@ type SharedFile struct {
 	FileMetadata     *FileMetadata              `json:"metadata"`
 	FileReplicaNodes map[uuid.UUID]*ReplicaNode `json:"replicaNodes"`
 	downloadActive   bool
+	validationActive bool
 	mu               sync.Mutex
 }
 
@@ -130,6 +131,38 @@ func (sf *SharedFile) DeactivateDownload() bool {
 }
 
 func (sf *SharedFile) IsDownloadActive() bool {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	return sf.downloadActive
+}
+
+func (sf *SharedFile) ActivateValidation() bool {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	var success bool
+	if sf.validationActive {
+		success = false
+	} else {
+		sf.validationActive = true
+		success = true
+	}
+	return success
+}
+
+func (sf *SharedFile) DeactivateValidation() bool {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+	var success bool
+	if sf.validationActive {
+		sf.validationActive = false
+		success = true
+	} else {
+		success = false
+	}
+	return success
+}
+
+func (sf *SharedFile) IsValidationActive() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.downloadActive

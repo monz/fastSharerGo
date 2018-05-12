@@ -168,8 +168,11 @@ func (s *ShareService) downloadFilePath(sf *commonData.SharedFile, withExtension
 // implement shareSubscriber interface
 func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	log.Println("Added shared file from other client")
-	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
+	go s.requestDownload(remoteSf)
+}
 
+func (s *ShareService) requestDownload(remoteSf commonData.SharedFile) {
+	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
 	// if file is shared, check if it is local, if is local, stop here
 	if sfT, ok := s.sharedFiles[remoteSf.FileId()]; ok {
 		if sfT.IsLocal() {
@@ -188,7 +191,7 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	// todo: think about maxDownload/maxUpload sema handling
 	// where to take the tokens, who holds the tokens...
 	filePath := s.downloadFilePath(sf, false)
-	go s.downloader.RequestDownload(sf, filePath)
+	s.downloader.RequestDownload(sf, filePath)
 }
 
 func (s *ShareService) updateSharedFileList(remoteSf *commonData.SharedFile) (*commonData.SharedFile, error) {

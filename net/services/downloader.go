@@ -42,72 +42,76 @@ func NewShareDownloader(localNodeId uuid.UUID, downloadTokens chan int, sender S
 
 func (s *ShareDownloader) RequestDownload(sf *commonData.SharedFile, filePath string) {
 	// if download already active nothing to do
-	if sf.IsDownloadActive() {
+	if sf.IsDownloadActive() || sf.IsValidationActive() {
 		log.Printf("Download of file '%s' already active\n", sf.FileName())
 		return
 	}
-	// check whether file was already downloaded and is sound
-	wasDownloaded, err := s.fileWasDownloaded(sf, filePath)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	if wasDownloaded {
-		log.Println("File was already downloaded, skipping...", sf.FileName())
-		return
+	// check if file already exists
+	isExisting := fileExists(filePath)
+	if isExisting {
+		// check whether file is valid
+		isValid, err := s.validateFile(sf, filePath)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		if isValid {
+			log.Println("File was already downloaded, skipping...", sf.FileName())
+			return
+		} else {
+			log.Println("Delete corrupted file, subsequently start download")
+			if err := os.Remove(filePath); err != nil {
+				log.Println(err)
+				return
+			}
+		}
 	}
 	// check for enough space on disk
 	if !enoughSpace(sf.FilePath()) {
 		log.Println("Not enough disk space to download file:", sf.FileName())
 		return
 	}
+	// activate download of shared file
+	log.Println("Activate download of file:", sf.FileName())
+	if ok := sf.ActivateDownload(); !ok {
+		log.Printf("Could not activate download of file '%s'\n", sf.FileName())
+		return
+	}
 	// schedule download
 	s.scheduleDownload(sf, 0)
 }
 
-func (s *ShareDownloader) fileWasDownloaded(sf *commonData.SharedFile, filePath string) (bool, error) {
-	isExisting := fileExists(filePath)
-	isComplete := false
+func (s *ShareDownloader) validateFile(sf *commonData.SharedFile, filePath string) (bool, error) {
+	log.Println("Check if existing file is valid")
 
-	// if file exists, check whether file is sound
-	if isExisting {
-		// check if file checksum information arrived, yet
-		if len(sf.Checksum()) <= 0 {
-			return false, errors.New(fmt.Sprintf("Coult not check checksum of file '%s', waiting for checksum\n", sf.FileName()))
-		}
-		// before checksum calculation set shared file activation state to 'active'
-		// to prevent cyclic check of file soundness. This is required because
-		// checksum calculation may take some time
-		if ok := sf.ActivateDownload(); !ok {
-			return false, errors.New(fmt.Sprintf("Could not activate download of file '%s'\n", sf.FileName()))
-		}
-
-		// calculate and compare all file checksums
-		var err error
-		isComplete, err = fileComplete(filePath, sf.Checksum(), sf.Chunks())
-		if err != nil {
-			return false, err
-		}
-		if isComplete {
-			sf.SetAllChunksLocal(true)
-		}
+	// start validation
+	if ok := sf.ActivateValidation(); !ok {
+		return false, errors.New(fmt.Sprintf("Could not activate validation state of file '%s'\n", sf.FileName()))
+	}
+	// check if file checksum information arrived, yet
+	if len(sf.Checksum()) <= 0 {
+		return false, errors.New(fmt.Sprintf("Coult not check checksum of file '%s', waiting for checksum\n", sf.FileName()))
+	}
+	// calculate and compare all file checksums
+	isComplete, err := fileComplete(filePath, sf.Checksum(), sf.Chunks())
+	if err != nil {
+		return false, err
+	}
+	if isComplete {
+		sf.SetAllChunksLocal(true)
+	}
+	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", true, isComplete)
+	isValid := false
+	if isComplete {
+		log.Println("File is valid")
+		isValid = true
+	}
+	// finish validation
+	if ok := sf.DeactivateValidation(); !ok {
+		return false, errors.New(fmt.Sprintf("Could not deactivate validation state of file '%s'\n", sf.FileName()))
 	}
 
-	// if file exists and is sound, file was downloaded, not otherwise
-	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", isExisting, isComplete)
-	wasDownloaded := false
-	if isExisting && isComplete {
-		log.Println("File already downloaded")
-		wasDownloaded = true
-	} else if isExisting && !isComplete {
-		// delete corrupt file
-		log.Println("Delete corrupted file")
-		if err := os.Remove(filePath); err != nil {
-			return false, err
-		}
-		wasDownloaded = false
-	}
-	return wasDownloaded, nil
+	return isValid, nil
 }
 
 func fileExists(filePath string) bool {
