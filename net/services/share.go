@@ -34,13 +34,13 @@ type ShareService struct {
 	maxUploads        chan int
 	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
-	sender            chan data.ShareCommand
+	sender            *ShareSender
 	fileInfoer        FileInfoer
 	stopped           bool
 	mu                sync.Mutex
 }
 
-func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoPeriod time.Duration, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
+func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, infoPeriod time.Duration, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
 	s := new(ShareService)
 	s.localNodeId = localNodeId
 	s.nodes = make(map[uuid.UUID]*data.Node)
@@ -50,8 +50,8 @@ func NewShareService(localNodeId uuid.UUID, sender chan data.ShareCommand, infoP
 	s.maxUploads = util.InitSema(maxUploads)
 	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
-	s.sender = sender
-	s.fileInfoer = NewSharedFileInfoer(localNodeId, sender)
+	s.sender = NewShareSender(senderChan)
+	s.fileInfoer = NewSharedFileInfoer(localNodeId, s.sender)
 	s.stopped = false
 	// init random
 	rand.Seed(time.Now().UnixNano())
@@ -140,13 +140,12 @@ func (s *ShareService) acceptUpload(r data.DownloadRequest) {
 		s.uploadFail()
 		return
 	}
-	cmd := data.NewShareCommand(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
 		// could not send data
 		log.Println("Could not send download request result!")
 		s.uploadFail()
 		return
 	})
-	s.sender <- *cmd
 	// wait for other client to connect then upload chunk data
 	// set timeout
 	err = l.SetDeadline(time.Now().Add(socketTimeout))
@@ -188,12 +187,11 @@ func (s *ShareService) denyUpload(r data.DownloadRequest) {
 		log.Println(err)
 		return
 	}
-	cmd := data.NewShareCommand(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
 		// could not send data
 		log.Println("Could not send download request result!")
 		return
 	})
-	s.sender <- *cmd
 }
 
 func (s *ShareService) sendData(conn *net.TCPConn, fileId string, chunkChecksum string) error {
@@ -540,7 +538,7 @@ func (s *ShareService) requestDownload(sf *commonData.SharedFile, initialDelay t
 
 		// send download request for chunk
 		request := []interface{}{data.NewDownloadRequest(sf.FileId(), s.localNodeId.String(), chunk.Checksum())}
-		cmd := data.NewShareCommand(data.DownloadRequestCmd, request, nodeId, func() {
+		s.sender.SendCallback(data.DownloadRequestCmd, request, nodeId, func() {
 			log.Println("Could not send message!")
 			if !chunk.DeactivateDownload() {
 				log.Println("Could not deactivate download of chunk", chunk.Checksum())
@@ -548,7 +546,6 @@ func (s *ShareService) requestDownload(sf *commonData.SharedFile, initialDelay t
 			// release download token
 			s.downloadFail(nil)
 		})
-		s.sender <- *cmd
 
 		// check whether new chunk information arrived
 		chunkCount = len(sf.ChunksToDownload())

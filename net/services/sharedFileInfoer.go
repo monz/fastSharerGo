@@ -4,7 +4,6 @@ import (
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/net/data"
-	"log"
 )
 
 type FileInfoer interface {
@@ -14,10 +13,10 @@ type FileInfoer interface {
 
 type SharedFileInfoer struct {
 	localNodeId uuid.UUID
-	sender      chan data.ShareCommand
+	sender      Sender
 }
 
-func NewSharedFileInfoer(localNodeId uuid.UUID, sender chan data.ShareCommand) *SharedFileInfoer {
+func NewSharedFileInfoer(localNodeId uuid.UUID, sender Sender) *SharedFileInfoer {
 	s := new(SharedFileInfoer)
 	s.localNodeId = localNodeId
 	s.sender = sender
@@ -32,13 +31,7 @@ func (s *SharedFileInfoer) SendFileInfo(sf commonData.SharedFile, nodeId uuid.UU
 	sf.AddReplicaNode(localNode)
 
 	// send data
-	shareList := []interface{}{sf}
-	cmd := data.NewShareCommand(data.PushShareListCmd, shareList, nodeId, func() {
-		// could not send data
-		log.Println("Could not send share list data")
-		return
-	})
-	s.sender <- *cmd
+	s.sender.Send(data.PushShareListCmd, []interface{}{sf}, nodeId, "Could not send shared file info")
 }
 
 func (s *SharedFileInfoer) SendCompleteMsg(sf commonData.SharedFile, nodeId uuid.UUID) {
@@ -47,11 +40,5 @@ func (s *SharedFileInfoer) SendCompleteMsg(sf commonData.SharedFile, nodeId uuid
 	sf.AddReplicaNode(localNode)
 
 	// send data
-	shareList := []interface{}{sf}
-	cmd := data.NewShareCommand(data.PushShareListCmd, shareList, nodeId, func() {
-		// could not send data
-		log.Println("Could not send complete message")
-		return
-	})
-	s.sender <- *cmd
+	s.sender.Send(data.PushShareListCmd, []interface{}{sf}, nodeId, "Could not send complete message")
 }
