@@ -7,7 +7,6 @@ import (
 	tools "github.com/monz/fastSharerGo/common/util"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -170,85 +169,50 @@ func (s *ShareService) downloadFilePath(sf *commonData.SharedFile, withExtension
 func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 	log.Println("Added shared file from other client")
 	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
-	// add/update share file list
-	sf, ok := s.sharedFiles[remoteSf.FileId()]
-	if ok {
-		// if file is local stop here
-		if sf.IsLocal() {
+
+	// if file is shared, check if it is local, if is local, stop here
+	if sfT, ok := s.sharedFiles[remoteSf.FileId()]; ok {
+		if sfT.IsLocal() {
 			log.Println("File is local, do not have to download")
 			return
 		}
+	}
+	// add/update share file list, consolidate shared file information
+	sf, err := s.updateSharedFileList(&remoteSf)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	// request/activate download
+	// todo: think about maxDownload/maxUpload sema handling
+	// where to take the tokens, who holds the tokens...
+	filePath := s.downloadFilePath(sf, false)
+	go s.downloader.RequestDownload(sf, filePath)
+}
+
+func (s *ShareService) updateSharedFileList(remoteSf *commonData.SharedFile) (*commonData.SharedFile, error) {
+	sf, ok := s.sharedFiles[remoteSf.FileId()]
+	if ok {
 		// update
-		err := s.consolidateSharedFileInfo(sf, remoteSf)
-		if err != nil {
-			log.Println(err)
-			return
+		log.Printf("Update shared file information of file '%s'\n", sf.FileName())
+		if err := s.consolidateSharedFileInfo(sf, remoteSf); err != nil {
+			return nil, err
 		}
 	} else {
 		// add
-		sf = &remoteSf
-		sf.ClearReplicaNodes()
-		err := s.consolidateSharedFileInfo(sf, remoteSf)
-		if err != nil {
-			log.Println(err)
-			return
+		log.Printf("First added shared file information of file '%s'\n", remoteSf.FileName())
+		sf = remoteSf
+		sf.ClearReplicaNodes() // fix: needs another solution, deletes replica nodes in remoteSf, too, due to reference
+		if err := s.consolidateSharedFileInfo(sf, remoteSf); err != nil {
+			return nil, err
 		}
-		//sf.ClearChunksWithoutChecksum() // unnecessary due to consolidation
-		log.Println("First added shared file has chunkCount = ", len(sf.Chunks()))
 		s.sharedFiles[sf.FileId()] = sf
 	}
-
-	filePath := s.downloadFilePath(sf, false)
-	log.Println("This is the file path:", filePath)
-	isExisting := fileExists(filePath)
-	isComplete := !isExisting
-	if isExisting {
-		var err error
-		isComplete, err = fileComplete(filePath, sf.Checksum(), sf.Chunks())
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		if isComplete {
-			sf.SetAllChunksLocal(true)
-		}
-	}
-	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", isExisting, isComplete)
-	if isExisting && isComplete {
-		log.Println("File already downloaded")
-		return
-	} else if isExisting && !isComplete {
-		log.Println("Delete corrupted file")
-		err := os.Remove(filePath)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-	} else if sf.IsDownloadActive() {
-		log.Printf("Download of file '%s' already active\n", sf.FileName())
-		return
-	} else {
-		// maybe move activateDownload into download function
-		// currently used to mark sharedFile as 'already handled'
-		// to prevent cyclicly checking if downloaded files are complete
-		if ok := sf.ActivateDownload(); !ok {
-			log.Fatal("Could not activate download of file", sf.FileName())
-		}
-	}
-
-	// check for enough space on disk
-	if !enoughSpace(sf.FilePath()) {
-		log.Println("Not enough disk space to download file:", sf.FileName())
-		return
-	}
-
-	// activate download
-	// todo: think about maxDownload/maxUpload sema handling
-	// where to take the tokens, who holds the tokens...
-	go s.downloader.RequestDownload(sf, 0)
+	return sf, nil
 }
 
-func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf commonData.SharedFile) error {
+func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile, remoteSf *commonData.SharedFile) error {
 	log.Println("Consolidate shared file information")
 	// clean paths
 	localSf.SetFilePath(tools.CleanPath(remoteSf.FilePath()))
@@ -283,36 +247,6 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 		localSf.AddChunk(remoteChunk)
 	}
 	return nil
-}
-
-func fileExists(filePath string) bool {
-	var exists bool
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		exists = false
-	} else {
-		exists = true
-	}
-	return exists
-}
-
-func fileComplete(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
-	checksums := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		checksum, err := util.CalculateChecksum(filePath, chunk.Offset(), chunk.Size())
-		if err != nil {
-			return false, err
-		}
-		checksums = append(checksums, checksum)
-	}
-	calculatedChecksum := util.SumOfChecksums(checksums)
-
-	log.Printf("FileComplete: expectedSum = %s, actualSum = %s\n", checksum, calculatedChecksum)
-	return checksum == calculatedChecksum, nil
-}
-
-func enoughSpace(filePath string) bool {
-	// todo: implement
-	return true
 }
 
 // implement nodeSubscriber interface
