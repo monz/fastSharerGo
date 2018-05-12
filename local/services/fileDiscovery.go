@@ -142,10 +142,10 @@ func (f *FileDiscoveryService) handleWatcherEvent(event fsnotify.Event) {
 		if err != nil {
 			log.Println(err)
 		}
-		err = f.handleFile(filePath, relativePath)
-		if err != nil {
-			log.Println(err)
-		}
+		//err = f.handleFile(filePath, relativePath)
+		//if err != nil {
+		//	log.Println(err)
+		//}
 	case fsnotify.Write:
 		// todo:
 		log.Println("Write file:", event.Name)
