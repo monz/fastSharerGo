@@ -34,7 +34,8 @@ type ShareService struct {
 	maxUploads        chan int
 	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
-	sender            *ShareSender
+	sender            Sender
+	uploader          Uploader
 	fileInfoer        FileInfoer
 	stopped           bool
 	mu                sync.Mutex
@@ -51,6 +52,7 @@ func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, i
 	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = NewShareSender(senderChan)
+	s.uploader = NewShareUploader(localNodeId, s.maxUploads, s.sender)
 	s.fileInfoer = NewSharedFileInfoer(localNodeId, s.sender)
 	s.stopped = false
 	// init random
@@ -103,12 +105,12 @@ func (s *ShareService) upload(r data.DownloadRequest) {
 	// check if requested chunk is local
 	sf, ok := s.sharedFiles[r.FileId()]
 	if !ok {
-		s.denyUpload(r)
+		s.uploader.Deny(r)
 		return
 	}
 	chunk, ok := sf.ChunkById(r.ChunkChecksum())
 	if !ok || !chunk.IsLocal() {
-		s.denyUpload(r)
+		s.uploader.Deny(r)
 		return
 	}
 	// acquire upload token
@@ -116,148 +118,11 @@ func (s *ShareService) upload(r data.DownloadRequest) {
 	select {
 	case <-s.maxUploads:
 		log.Println("Could acquire upload token")
-		s.acceptUpload(r)
+		s.uploader.Accept(r, sf, s.downloadFilePath(sf, !sf.IsLocal()))
 	case <-time.After(tokenAcquireTimeout):
-		s.denyUpload(r)
+		s.uploader.Deny(r)
 		return
 	}
-}
-
-func (s *ShareService) acceptUpload(r data.DownloadRequest) {
-	log.Println("Accept download request")
-	// open random port
-	l, err := net.ListenTCP("tcp", nil)
-	if err != nil {
-		log.Println(err)
-		s.uploadFail()
-		return
-	}
-	// send port information to other client
-	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), l.Addr().(*net.TCPAddr).Port)}
-	nodeId, err := uuid.Parse(r.NodeId())
-	if err != nil {
-		log.Println(err)
-		s.uploadFail()
-		return
-	}
-	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
-		// could not send data
-		log.Println("Could not send download request result!")
-		s.uploadFail()
-		return
-	})
-	// wait for other client to connect then upload chunk data
-	// set timeout
-	err = l.SetDeadline(time.Now().Add(socketTimeout))
-	if err != nil {
-		log.Println(err)
-		s.uploadFail()
-		return
-	}
-	// accept connection
-	conn, err := l.AcceptTCP()
-	if err != nil {
-		if err, ok := err.(*net.OpError); ok && err.Timeout() {
-			// connection timed out
-			log.Println("Connection timed out, other client did not connect within given time!")
-		}
-		log.Println(err)
-		s.uploadFail()
-		return
-	}
-	defer conn.Close()
-	// remote client accepted connection, disable timeout/deadline
-	l.SetDeadline(time.Time{})
-	// send data
-	err = s.sendData(conn, r.FileId(), r.ChunkChecksum())
-	if err != nil {
-		log.Println(err)
-		s.uploadFail()
-		return
-	}
-	// release upload token
-	s.uploadSuccess()
-}
-
-func (s *ShareService) denyUpload(r data.DownloadRequest) {
-	log.Println("Cannot accept download request")
-	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), data.DenyDownload)}
-	nodeId, err := uuid.Parse(r.NodeId())
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
-		// could not send data
-		log.Println("Could not send download request result!")
-		return
-	})
-}
-
-func (s *ShareService) sendData(conn *net.TCPConn, fileId string, chunkChecksum string) error {
-	sf, ok := s.sharedFiles[fileId]
-	if !ok {
-		return errors.New("Cannot send data, file not shared!")
-	}
-	chunk, ok := sf.ChunkById(chunkChecksum)
-	if !ok || !chunk.IsLocal() {
-		return errors.New("Cannot send data, requested chunk not available!")
-	}
-
-	// get file path to finished file, or currently downloading file with download extension
-	filePath, err := s.findPath(sf)
-	if err != nil {
-		return err
-	}
-
-	// open file
-	file, err := os.Open(filePath)
-	defer file.Close()
-	if err != nil {
-		return err
-	}
-	// send data
-	sectionReader := io.NewSectionReader(file, chunk.Offset(), chunk.Size())
-	io.Copy(conn, sectionReader)
-
-	return nil
-}
-
-func (s *ShareService) findPath(sf *commonData.SharedFile) (string, error) {
-	// if file is local try to find file in 'shared' directories first
-	found := false
-	path := sf.FilePath()
-	if sf.IsLocal() {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			found = true
-		}
-	}
-	if found {
-		return path, nil
-	}
-	// else search file in download directory
-	path = s.downloadFilePath(*sf, !sf.IsLocal())
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		found = true
-	}
-	if found {
-		return path, nil
-	}
-	return path, errors.New("Cannot upload! File not found")
-}
-
-func (s *ShareService) uploadSuccess() {
-	log.Println("Release upload token")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.maxUploads <- 1
-}
-
-func (s *ShareService) uploadFail() {
-	log.Println("Release upload token")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.maxUploads <- 1
 }
 
 // implement shareSubscriber interface
@@ -297,7 +162,7 @@ func (s *ShareService) download(rr data.DownloadRequestResult) {
 	defer tcpConn.Close()
 
 	// download chunk
-	checksum, filePath, err := s.receiveData(tcpConn, *sf, chunk)
+	checksum, filePath, err := s.receiveData(tcpConn, sf, chunk)
 	if err != nil {
 		log.Println(err)
 		s.downloadFail(chunk)
@@ -365,7 +230,18 @@ func (s *ShareService) downloadSuccess(sf *commonData.SharedFile, chunk *commonD
 	log.Println("Released download token")
 }
 
-func (s *ShareService) receiveData(conn *net.TCPConn, sf commonData.SharedFile, chunk *commonData.Chunk) (checksum string, filePath string, err error) {
+func (s *ShareService) downloadFilePath(sf *commonData.SharedFile, withExtension bool) string {
+	filePath := filepath.Join(s.downloadDir, sf.FileRelativePath())
+	if withExtension {
+		filePath += s.downloadExtension
+	}
+	log.Println("THIS IS THE DOWNLOAD FILE PATH:", filePath)
+	log.Println("THIS IS THE SHARED FILE PATH:", sf.FilePath())
+	log.Println("THIS IS THE SHARED RELATIVE FILE PATH:", sf.FileRelativePath())
+	return filePath
+}
+
+func (s *ShareService) receiveData(conn *net.TCPConn, sf *commonData.SharedFile, chunk *commonData.Chunk) (checksum string, filePath string, err error) {
 	// create directory structure including download directory
 	filePath = s.downloadFilePath(sf, true)
 	log.Println("The download file path = ", filePath)
@@ -454,7 +330,7 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 		s.sharedFiles[sf.FileId()] = sf
 	}
 
-	filePath := s.downloadFilePath(*sf, false)
+	filePath := s.downloadFilePath(sf, false)
 	log.Println("This is the file path:", filePath)
 	isExisting := fileExists(filePath)
 	isComplete := !isExisting
@@ -646,17 +522,6 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 		localSf.AddChunk(remoteChunk)
 	}
 	return nil
-}
-
-func (s *ShareService) downloadFilePath(sf commonData.SharedFile, withExtension bool) string {
-	filePath := filepath.Join(s.downloadDir, sf.FileRelativePath())
-	if withExtension {
-		filePath += s.downloadExtension
-	}
-	log.Println("THIS IS THE DOWNLOAD FILE PATH:", filePath)
-	log.Println("THIS IS THE SHARED FILE PATH:", sf.FilePath())
-	log.Println("THIS IS THE SHARED RELATIVE FILE PATH:", sf.FileRelativePath())
-	return filePath
 }
 
 func fileExists(filePath string) bool {
