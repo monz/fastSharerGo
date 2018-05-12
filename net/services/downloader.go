@@ -47,22 +47,14 @@ func (s *ShareDownloader) RequestDownload(sf *commonData.SharedFile, filePath st
 		return
 	}
 	// check whether file was already downloaded and is sound
-	// sound means all checksums did match
-	soundFile, err := s.fileWasDownloaded(sf, filePath)
+	wasDownloaded, err := s.fileWasDownloaded(sf, filePath)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	if soundFile {
+	if wasDownloaded {
 		log.Println("File was already downloaded, skipping...", sf.FileName())
 		return
-	} else {
-		// delete corrupt file, subsequently start file download
-		log.Println("Delete corrupted file")
-		if err := os.Remove(filePath); err != nil {
-			log.Println(err)
-			return
-		}
 	}
 	// check for enough space on disk
 	if !enoughSpace(sf.FilePath()) {
@@ -107,6 +99,13 @@ func (s *ShareDownloader) fileWasDownloaded(sf *commonData.SharedFile, filePath 
 	if isExisting && isComplete {
 		log.Println("File already downloaded")
 		wasDownloaded = true
+	} else if isExisting && !isComplete {
+		// delete corrupt file
+		log.Println("Delete corrupted file")
+		if err := os.Remove(filePath); err != nil {
+			return false, err
+		}
+		wasDownloaded = false
 	}
 	return wasDownloaded, nil
 }
