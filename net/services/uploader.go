@@ -14,8 +14,8 @@ import (
 )
 
 type Uploader interface {
-	Accept(r data.DownloadRequest, sf *commonData.SharedFile, downloadPath string)
-	Deny(r data.DownloadRequest)
+	Accept(sf *commonData.SharedFile, chunkChecksum string, nodeId string, downloadPath string)
+	Deny(fileId string, chunkChecksum string, nodeId string)
 }
 
 type ShareUploader struct {
@@ -34,7 +34,7 @@ func NewShareUploader(localNodeId uuid.UUID, uploadTokens chan int, sender Sende
 	return s
 }
 
-func (s *ShareUploader) Accept(r data.DownloadRequest, sf *commonData.SharedFile, downloadPath string) {
+func (s *ShareUploader) Accept(sf *commonData.SharedFile, chunkChecksum string, nodeId string, downloadPath string) {
 	log.Println("Accept download request")
 	// open random port
 	l, err := net.ListenTCP("tcp", nil)
@@ -44,14 +44,14 @@ func (s *ShareUploader) Accept(r data.DownloadRequest, sf *commonData.SharedFile
 		return
 	}
 	// send port information to other client
-	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), l.Addr().(*net.TCPAddr).Port)}
-	nodeId, err := uuid.Parse(r.NodeId())
+	requestResult := []interface{}{data.NewDownloadRequestResult(sf.FileId(), s.localNodeId.String(), chunkChecksum, l.Addr().(*net.TCPAddr).Port)}
+	id, err := uuid.Parse(nodeId)
 	if err != nil {
 		log.Println(err)
 		s.uploadFail()
 		return
 	}
-	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, id, func() {
 		// could not send data
 		log.Println("Could not send download request result!")
 		s.uploadFail()
@@ -80,7 +80,7 @@ func (s *ShareUploader) Accept(r data.DownloadRequest, sf *commonData.SharedFile
 	// remote client accepted connection, disable timeout/deadline
 	l.SetDeadline(time.Time{})
 	// send data
-	err = s.sendData(sf, conn, r.FileId(), r.ChunkChecksum(), downloadPath)
+	err = s.sendData(sf, conn, sf.FileId(), chunkChecksum, downloadPath)
 	if err != nil {
 		log.Println(err)
 		s.uploadFail()
@@ -90,20 +90,19 @@ func (s *ShareUploader) Accept(r data.DownloadRequest, sf *commonData.SharedFile
 	s.uploadSuccess()
 }
 
-func (s *ShareUploader) Deny(r data.DownloadRequest) {
+func (s *ShareUploader) Deny(fileId string, chunkChecksum string, nodeId string) {
 	log.Println("Cannot accept download request")
-	requestResult := []interface{}{data.NewDownloadRequestResult(r.FileId(), s.localNodeId.String(), r.ChunkChecksum(), data.DenyDownload)}
-	nodeId, err := uuid.Parse(r.NodeId())
+	requestResult := []interface{}{data.NewDownloadRequestResult(fileId, s.localNodeId.String(), chunkChecksum, data.DenyDownload)}
+	id, err := uuid.Parse(nodeId)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, nodeId, func() {
+	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, id, func() {
 		// could not send data
 		log.Println("Could not send download request result!")
 		return
 	})
-
 }
 
 func (s *ShareUploader) uploadSuccess() {

@@ -98,12 +98,12 @@ func (s *ShareService) upload(r data.DownloadRequest) {
 	// check if requested chunk is local
 	sf, ok := s.sharedFiles[r.FileId()]
 	if !ok {
-		s.uploader.Deny(r)
+		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
 		return
 	}
 	chunk, ok := sf.ChunkById(r.ChunkChecksum())
 	if !ok || !chunk.IsLocal() {
-		s.uploader.Deny(r)
+		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
 		return
 	}
 	// acquire upload token
@@ -111,9 +111,9 @@ func (s *ShareService) upload(r data.DownloadRequest) {
 	select {
 	case <-s.maxUploads:
 		log.Println("Could acquire upload token")
-		s.uploader.Accept(r, sf, s.downloadFilePath(sf, !sf.IsLocal()))
+		s.uploader.Accept(sf, chunk.Checksum(), r.NodeId(), s.downloadFilePath(sf, !sf.IsLocal()))
 	case <-time.After(tokenAcquireTimeout):
-		s.uploader.Deny(r)
+		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
 		return
 	}
 }
