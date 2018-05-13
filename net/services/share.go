@@ -160,20 +160,18 @@ func (s *ShareService) ReceivedShareList(remoteSf commonData.SharedFile) {
 
 func (s *ShareService) requestDownload(remoteSf commonData.SharedFile) {
 	log.Printf("ShareSerive contains %d files\n", len(s.sharedFiles))
-	// if file is shared, check if it is local, if is local, stop here
-	if sfT, ok := s.sharedFiles[remoteSf.FileId()]; ok {
-		if sfT.IsLocal() {
-			log.Println("File is local, do not have to download")
-			return
-		}
-	}
 	// add/update share file list, consolidate shared file information
+	// always consolidate information, to get all information about files in network
 	sf, err := s.updateSharedFileList(&remoteSf)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-
+	// if file is shared, check if it is local, if is local, stop here
+	if sf.IsLocal() {
+		log.Println("File is local, do not have to download")
+		return
+	}
 	// request/activate download
 	// todo: think about maxDownload/maxUpload sema handling
 	// where to take the tokens, who holds the tokens...
@@ -221,8 +219,7 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 			continue
 		}
 		// copy complete state
-		//node.SetIsAllInfoReceived(node.IsAllInfoReceived()) // fix: this line does not make any sense
-		localSf.AddReplicaNode(node)
+		localSf.UpdateReplicaNode(node)
 	}
 	// update shared file checksum
 	if len(localSf.Checksum()) <= 0 {

@@ -28,7 +28,7 @@ func (s *SharedFileInfoer) SendFileInfo(sf commonData.SharedFile, nodeId uuid.UU
 	// add local node as replica node for all local chunks
 	chunkSums := sf.LocalChunksChecksums()
 	localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
-	sf.AddReplicaNode(localNode)
+	sf.UpdateReplicaNode(localNode)
 
 	// send data
 	s.sender.Send(data.PushShareListCmd, []interface{}{sf}, nodeId, "Could not send shared file info")
@@ -37,7 +37,7 @@ func (s *SharedFileInfoer) SendFileInfo(sf commonData.SharedFile, nodeId uuid.UU
 func (s *SharedFileInfoer) SendCompleteMsg(sf commonData.SharedFile, nodeId uuid.UUID) {
 	// send information that node is complete
 	localNode := commonData.NewReplicaNode(s.localNodeId, []string{}, len(sf.Checksum()) > 0)
-	sf.AddReplicaNode(localNode)
+	sf.UpdateReplicaNode(localNode)
 
 	// send data
 	s.sender.Send(data.PushShareListCmd, []interface{}{sf}, nodeId, "Could not send complete message")

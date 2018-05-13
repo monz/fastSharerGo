@@ -84,7 +84,7 @@ func (sf *SharedFile) ReplicaNodeById(id uuid.UUID) (*ReplicaNode, bool) {
 	return replicaNode, ok
 }
 
-func (sf *SharedFile) AddReplicaNode(newNode *ReplicaNode) {
+func (sf *SharedFile) UpdateReplicaNode(newNode *ReplicaNode) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
@@ -102,6 +102,8 @@ func (sf *SharedFile) AddReplicaNode(newNode *ReplicaNode) {
 		}
 		node.PutIfAbsent(chunkChecksum)
 	}
+	// update complete state
+	node.SetIsAllInfoReceived(newNode.IsAllInfoReceived())
 }
 
 func (sf *SharedFile) ActivateDownload() bool {
