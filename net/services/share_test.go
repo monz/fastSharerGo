@@ -482,7 +482,7 @@ func TestSendingCompleteMsg(t *testing.T) {
 	}
 	// add any replica node to shared file
 	expectedReplicaNode := commonData.NewReplicaNode(node.Id(), sf.LocalChunksChecksums(), len(sf.Checksum()) > 0)
-	sf.AddReplicaNode(expectedReplicaNode)
+	sf.UpdateReplicaNode(expectedReplicaNode)
 	shareService.AddLocalSharedFile(*sf)
 
 	// start reader for messages
