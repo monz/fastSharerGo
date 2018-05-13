@@ -1,0 +1,10 @@
+language: go
+
+go:
+        - master
+
+before_install:
+        - go get -v github.com/google/uuid
+
+script:
+        - go test ./...
