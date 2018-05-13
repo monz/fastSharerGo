@@ -3,7 +3,6 @@ package net
 import (
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
-	"github.com/monz/fastSharerGo/common/services"
 	tools "github.com/monz/fastSharerGo/common/util"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
@@ -24,8 +23,6 @@ type ShareService struct {
 	infoPeriod        time.Duration
 	downloadDir       string
 	downloadExtension string
-	maxUploads        chan int
-	maxDownloads      chan int
 	sharedFiles       map[string]*commonData.SharedFile
 	sender            Sender
 	uploader          Uploader
@@ -42,12 +39,10 @@ func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, i
 	s.infoPeriod = infoPeriod
 	s.downloadDir = downloadDir
 	s.downloadExtension = ".part" // todo: load from paramter
-	s.maxUploads = util.InitSema(maxUploads)
-	s.maxDownloads = util.InitSema(maxDownloads)
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
 	s.sender = NewShareSender(senderChan)
-	s.uploader = NewShareUploader(localNodeId, s.maxUploads, s.sender)
-	s.downloader = NewShareDownloader(localNodeId, s.maxDownloads, s.sender)
+	s.uploader = NewShareUploader(localNodeId, maxUploads, s.sender)
+	s.downloader = NewShareDownloader(localNodeId, maxDownloads, s.sender)
 	s.fileInfoer = NewSharedFileInfoer(localNodeId, s.sender)
 	s.stopped = false
 
@@ -98,24 +93,16 @@ func (s *ShareService) upload(r data.DownloadRequest) {
 	// check if requested chunk is local
 	sf, ok := s.sharedFiles[r.FileId()]
 	if !ok {
-		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
+		s.uploader.Fail(r.FileId(), r.ChunkChecksum(), r.NodeId())
 		return
 	}
 	chunk, ok := sf.ChunkById(r.ChunkChecksum())
 	if !ok || !chunk.IsLocal() {
-		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
+		s.uploader.Fail(r.FileId(), r.ChunkChecksum(), r.NodeId())
 		return
 	}
-	// acquire upload token
-	log.Println("Waiting to acquire upload token...")
-	select {
-	case <-s.maxUploads:
-		log.Println("Could acquire upload token")
-		s.uploader.Accept(sf, chunk.Checksum(), r.NodeId(), s.downloadFilePath(sf, !sf.IsLocal()))
-	case <-time.After(tokenAcquireTimeout):
-		s.uploader.Deny(r.FileId(), r.ChunkChecksum(), r.NodeId())
-		return
-	}
+	// start upload
+	s.uploader.Upload(sf, chunk.Checksum(), r.NodeId(), s.downloadFilePath(sf, !sf.IsLocal()))
 }
 
 // implement shareSubscriber interface

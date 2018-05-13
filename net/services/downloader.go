@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -27,12 +28,13 @@ type ShareDownloader struct {
 	localNodeId    uuid.UUID
 	downloadTokens chan int
 	sender         Sender
+	mu             sync.Mutex
 }
 
-func NewShareDownloader(localNodeId uuid.UUID, downloadTokens chan int, sender Sender) *ShareDownloader {
+func NewShareDownloader(localNodeId uuid.UUID, downloadTokens int, sender Sender) *ShareDownloader {
 	s := new(ShareDownloader)
 	s.localNodeId = localNodeId
-	s.downloadTokens = downloadTokens
+	s.downloadTokens = util.InitSema(downloadTokens)
 	s.sender = sender
 	// init random
 	rand.Seed(time.Now().UnixNano())
@@ -353,6 +355,9 @@ func (s *ShareDownloader) receiveData(conn *net.TCPConn, sf *commonData.SharedFi
 }
 
 func (s *ShareDownloader) downloadSuccess(sf *commonData.SharedFile, chunk *commonData.Chunk, oldFilePath string) {
+	// need lock for renaming file only once
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	log.Printf("Download of chunk '%s' of file '%s' was successful\n", chunk.Checksum(), sf.FileId())
 	chunk.SetLocal(true)
 	chunk.DeactivateDownload()

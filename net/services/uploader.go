@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
+	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
 	"log"
@@ -14,8 +15,8 @@ import (
 )
 
 type Uploader interface {
-	Accept(sf *commonData.SharedFile, chunkChecksum string, nodeId string, downloadPath string)
-	Deny(fileId string, chunkChecksum string, nodeId string)
+	Upload(sf *commonData.SharedFile, chunkChecksum string, nodeId string, filePath string)
+	Fail(fileId string, chunkChecksum string, nodeId string)
 }
 
 type ShareUploader struct {
@@ -25,16 +26,28 @@ type ShareUploader struct {
 	mu           sync.Mutex
 }
 
-func NewShareUploader(localNodeId uuid.UUID, uploadTokens chan int, sender Sender) *ShareUploader {
+func NewShareUploader(localNodeId uuid.UUID, uploadTokens int, sender Sender) *ShareUploader {
 	s := new(ShareUploader)
 	s.localNodeId = localNodeId
-	s.uploadTokens = uploadTokens
+	s.uploadTokens = util.InitSema(uploadTokens)
 	s.sender = sender
 
 	return s
 }
 
-func (s *ShareUploader) Accept(sf *commonData.SharedFile, chunkChecksum string, nodeId string, downloadPath string) {
+func (s *ShareUploader) Upload(sf *commonData.SharedFile, chunkChecksum string, nodeId string, filePath string) {
+	log.Println("Waiting to acquire upload token...")
+	select {
+	case <-s.uploadTokens:
+		log.Println("Could acquire upload token")
+		s.accept(sf, chunkChecksum, nodeId, filePath)
+	case <-time.After(tokenAcquireTimeout):
+		s.deny(sf.FileId(), chunkChecksum, nodeId)
+		return
+	}
+}
+
+func (s *ShareUploader) accept(sf *commonData.SharedFile, chunkChecksum string, nodeId string, downloadPath string) {
 	log.Println("Accept download request")
 	// open random port
 	l, err := net.ListenTCP("tcp", nil)
@@ -90,7 +103,7 @@ func (s *ShareUploader) Accept(sf *commonData.SharedFile, chunkChecksum string, 
 	s.uploadSuccess()
 }
 
-func (s *ShareUploader) Deny(fileId string, chunkChecksum string, nodeId string) {
+func (s *ShareUploader) deny(fileId string, chunkChecksum string, nodeId string) {
 	log.Println("Cannot accept download request")
 	requestResult := []interface{}{data.NewDownloadRequestResult(fileId, s.localNodeId.String(), chunkChecksum, data.DenyDownload)}
 	id, err := uuid.Parse(nodeId)
@@ -103,6 +116,10 @@ func (s *ShareUploader) Deny(fileId string, chunkChecksum string, nodeId string)
 		log.Println("Could not send download request result!")
 		return
 	})
+}
+
+func (s *ShareUploader) Fail(fileId string, chunkChecksum string, nodeId string) {
+	s.deny(fileId, chunkChecksum, nodeId)
 }
 
 func (s *ShareUploader) uploadSuccess() {
