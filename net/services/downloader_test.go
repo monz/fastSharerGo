@@ -19,21 +19,6 @@ func createDownloader() (Downloader, chan data.ShareCommand) {
 	return NewShareDownloader(uuid.New(), downloadTokens, sender), senderChan
 }
 
-func createSharedFile(t *testing.T, parentDir string) *commonData.SharedFile {
-	tmpFile := createFile(t, parentDir)
-	relativePath, err := filepath.Rel(parentDir, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-
-	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
-
-	return sf
-}
-
 func TestRequestAlreadyDownloadingIgnore(t *testing.T) {
 	downloadDir, base := prepareDirs(t)
 	defer os.RemoveAll(downloadDir)

@@ -2,15 +2,14 @@ package net
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
 	"io"
-	"io/ioutil"
 	"log"
-	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -101,258 +100,6 @@ func TestReceivedDownloadRequestDenyUploadChunkNotLocal(t *testing.T) {
 	// go meta.CalculateChecksums(done)
 	// done <-
 	// meta.CalculateChecksums(func() {fmt.Println("done")})
-}
-
-func TestReceivedDownloadRequestDenyUploadCannotAcquireDownloadToken(t *testing.T) {
-	// prepare share service parameter
-	localNodeId := uuid.New()
-	sender := make(chan data.ShareCommand)
-
-	downloadDir, base := prepareDirs(t)
-	defer os.RemoveAll(downloadDir)
-	defer os.RemoveAll(base)
-
-	maxUploads := 0
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
-
-	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
-
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-	shareService.AddLocalSharedFile(*sf)
-
-	// prepare download request of unknown chunk
-	nodeId := uuid.New().String()
-	chunkChecksum := sf.LocalChunksChecksums()[0]
-	request := data.NewDownloadRequest(sf.FileId(), nodeId, chunkChecksum)
-
-	// start message reader for deny message
-	done := make(chan bool)
-	go readDenyUpload(t, done, sender, request)
-
-	// call receivedDownloadRequest method
-	shareService.ReceivedDownloadRequest(*request)
-
-	// wait for message
-	<-done
-}
-
-func readDenyUpload(t *testing.T, done chan bool, sender chan data.ShareCommand, request *data.DownloadRequest) {
-	// read data or time out
-	var cmd data.ShareCommand
-	select {
-	case cmd = <-sender:
-	case <-time.After(6 * time.Second): // must be longer than 'upload token' acquire timeout
-		t.Error("Did not receive denied upload message, timed out")
-	}
-	// check data type
-	if cmd.Type() != data.DownloadRequestResultCmd {
-		t.Error("Wrong share command type")
-	}
-	// check data
-	for _, d := range cmd.Data() {
-		requestResult := d.(*data.DownloadRequestResult)
-		// check if request was denied, expecting '-1' port
-		if requestResult.DownloadPort() != -1 {
-			t.Error("Got port nuber, but expected '-1'")
-		}
-		// check if denied right request
-		if request.FileId() != requestResult.FileId() {
-			t.Error("Request result file id does not match")
-		}
-		if request.ChunkChecksum() != requestResult.ChunkChecksum() {
-			t.Error("Request result chunk checksum does not match")
-		}
-	}
-	done <- true
-}
-
-func failAcceptUpload(t *testing.T, done chan bool, sender chan data.ShareCommand) {
-	// read data or time out
-	var cmd data.ShareCommand
-	select {
-	case cmd = <-sender:
-		// let upload fail
-		cmd.Callback()
-	case <-time.After(500 * time.Millisecond):
-		t.Error("Did not receive upload message, timed out")
-	}
-
-	done <- true
-}
-
-func failConnectClient(t *testing.T, done chan bool, sender chan data.ShareCommand) {
-	// read data or time out
-	var cmd data.ShareCommand
-	select {
-	case cmd = <-sender:
-		// check cmd type
-		if cmd.Type() != data.DownloadRequestResultCmd {
-			t.Error("Wrong share command type")
-		}
-		// let open connection time out on other client
-		time.Sleep(socketTimeout + 1*time.Second)
-	case <-time.After(500 * time.Millisecond):
-		t.Error("Did not receive upload message, timed out")
-	}
-
-	done <- true
-}
-
-func TestReceivedDownloadRequestAcceptUploadFailedSendingResult(t *testing.T) {
-	// prepare share service parameter
-	localNodeId := uuid.New()
-	sender := make(chan data.ShareCommand)
-
-	downloadDir, base := prepareDirs(t)
-	defer os.RemoveAll(downloadDir)
-	defer os.RemoveAll(base)
-
-	maxUploads := 1
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
-
-	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
-
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-	shareService.AddLocalSharedFile(*sf)
-	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
-
-	// prepare download request of unknown chunk
-	nodeId := uuid.New().String()
-	chunkChecksum := sf.LocalChunksChecksums()[0]
-	request := data.NewDownloadRequest(sf.FileId(), nodeId, chunkChecksum)
-
-	// start message reader for message
-	done := make(chan bool)
-	go failAcceptUpload(t, done, sender)
-
-	// call receivedDownloadRequest method
-	shareService.ReceivedDownloadRequest(*request)
-
-	// wait for message
-	<-done
-
-	// check wether upload token was released and subsequent requests get handled
-	shareService.ReceivedDownloadRequest(*request)
-
-	// start message reader for message
-	go failAcceptUpload(t, done, sender)
-
-	// wait for message
-	<-done
-}
-
-func TestReceivedDownloadRequestAcceptUploadFailedParseNodeId(t *testing.T) {
-	// prepare share service parameter
-	localNodeId := uuid.New()
-	sender := make(chan data.ShareCommand)
-
-	downloadDir, base := prepareDirs(t)
-	defer os.RemoveAll(downloadDir)
-	defer os.RemoveAll(base)
-
-	maxUploads := 1
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
-
-	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
-
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-	shareService.AddLocalSharedFile(*sf)
-	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
-
-	// prepare download request of unknown chunk
-	nodeId := "" // invalid id
-	chunkChecksum := sf.LocalChunksChecksums()[0]
-	request := data.NewDownloadRequest(sf.FileId(), nodeId, chunkChecksum)
-
-	// call receivedDownloadRequest method
-	shareService.ReceivedDownloadRequest(*request)
-
-	// check wether upload token was released and subsequent requests get handled
-	nodeId = uuid.New().String()
-	chunkChecksum = sf.LocalChunksChecksums()[0]
-	request = data.NewDownloadRequest(sf.FileId(), nodeId, chunkChecksum)
-	shareService.ReceivedDownloadRequest(*request)
-
-	// start message reader for message
-	done := make(chan bool)
-	go failAcceptUpload(t, done, sender)
-
-	// wait for message
-	<-done
-}
-
-func TestReceivedDownloadRequestAcceptUploadFailedClientConnectTimeout(t *testing.T) {
-	// prepare share service parameter
-	localNodeId := uuid.New()
-	sender := make(chan data.ShareCommand)
-
-	downloadDir, base := prepareDirs(t)
-	defer os.RemoveAll(downloadDir)
-	defer os.RemoveAll(base)
-
-	maxUploads := 1
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
-
-	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
-
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-	shareService.AddLocalSharedFile(*sf)
-	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
-
-	// prepare download request of unknown chunk
-	nodeId := uuid.New().String()
-	chunkChecksum := sf.LocalChunksChecksums()[0]
-	request := data.NewDownloadRequest(sf.FileId(), nodeId, chunkChecksum)
-
-	// start message reader for message
-	done := make(chan bool)
-	go failConnectClient(t, done, sender)
-
-	// call receivedDownloadRequest method
-	shareService.ReceivedDownloadRequest(*request)
-
-	// wait for message
-	<-done
-
-	// check wether upload token was released and subsequent requests get handled
-	shareService.ReceivedDownloadRequest(*request)
-
-	// start message reader for message
-	go failAcceptUpload(t, done, sender)
-
-	// wait for message
-	<-done
 }
 
 func TestReceivedDownloadRequestResultAcceptUploadLocalFileSharedDirectory(t *testing.T) {
@@ -448,9 +195,97 @@ func TestReceivedDownloadRequestResultAcceptUploadPartialFileDownloadDirectory(t
 	// upload chunk of file which is not local yet, only partially downloaded, from download directory
 }
 
-func TestReceivedShareList(t *testing.T) {
-	// todo: implement
-}
+//func TestReceivedShareListFirstTimeSeen(t *testing.T) {
+//	// todo: implement
+//	// received shared info the first time
+//
+//	// prepare share service parameter
+//	localNodeId := uuid.New()
+//	sender := make(chan data.ShareCommand)
+//
+//	downloadDir, base := prepareDirs(t)
+//	defer os.RemoveAll(downloadDir)
+//	defer os.RemoveAll(base)
+//
+//	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+//
+//	// add node
+//	node := data.NewNode(uuid.New(), "192.168.1.1")
+//	shareService.AddNode(*node)
+//	log.Println("Node added to service:", node.Id())
+//	log.Println("Local node id:", localNodeId)
+//
+//	// prepare share file info
+//	tmpFile := createFile(t, base)
+//	defer os.Remove(tmpFile.Name())
+//	relativePath, err := filepath.Rel(base, tmpFile.Name())
+//	if err != nil {
+//		t.Error(err)
+//	}
+//	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
+//	sf := commonData.NewSharedFile(meta)
+//
+//	// wait for chunk calculation
+//	time.Sleep(100 * time.Millisecond)
+//
+//	// add replica node
+//	replicaNode := commonData.NewReplicaNode(node.Id(), sf.ChunkSums(), false)
+//	sf.UpdateReplicaNode(replicaNode)
+//
+//	// marshalling and unmarshalling required to get correct object state
+//	marshalled, _ := json.Marshal(sf)
+//	var remoteSf commonData.SharedFile
+//	json.Unmarshal(marshalled, &remoteSf)
+//	log.Println("ReplicaNodeCount:", len(remoteSf.ReplicaNodes()))
+//	for _, replicaNode := range remoteSf.ReplicaNodes() {
+//		log.Println("replicaNode:", replicaNode.Id())
+//		log.Println("replicaNode:", replicaNode.ChunkCount())
+//	}
+//	// receive share list from other client
+//	shareService.ReceivedShareList(remoteSf)
+//
+//	// start reader for share info message
+//	done := make(chan bool)
+//	go readShareInfoMsgRemoteInfo(t, done, sender, sf)
+//
+//	// start share service
+//	shareService.Start()
+//	defer shareService.Stop()
+//
+//	// wait for message read
+//	<-done
+//}
+//
+//func readShareInfoMsgRemoteInfo(t *testing.T, done chan bool, sender chan data.ShareCommand, sf *commonData.SharedFile) {
+//	for {
+//		var cmd data.ShareCommand
+//		select {
+//		case cmd = <-sender:
+//		case <-time.After(1500 * time.Millisecond):
+//			t.Error("Expected to receive share info message, timed out")
+//		}
+//		log.Println("Cmd:", cmd)
+//		// check cmd type
+//		if cmd.Type() != data.PushShareListCmd {
+//			// ignore other message types
+//			continue
+//		}
+//		// handle cmd data
+//		for _, d := range cmd.Data() {
+//			actualSf := d.(commonData.SharedFile)
+//			log.Println("ReplicaNodeCount:", len(actualSf.ReplicaNodes()))
+//			log.Println("actualData:", actualSf.Chunks()[0].IsLocal())
+//			for _, replicaNode := range actualSf.ReplicaNodes() {
+//				log.Println("replicaNode:", replicaNode.Id())
+//				log.Println("replicaNode:", replicaNode.ChunkCount())
+//			}
+//		}
+//		// exit loop
+//		break
+//	}
+//	// finish reading
+//	done <- true
+//}
 
 func TestSendingCompleteMsg(t *testing.T) {
 	// prepare share service parameter
@@ -678,37 +513,6 @@ Loop:
 		}
 	}
 	done <- true
-}
-
-func createFile(t *testing.T, parentDir string) *os.File {
-	file, err := ioutil.TempFile(parentDir, "sharer")
-	if err != nil {
-		t.Error(err)
-	}
-	data := []byte("test file content")
-	rand.Seed(time.Now().UnixNano())
-	for i := 0; i < rand.Intn(100)+1; i++ {
-		if _, err := file.Write(data); err != nil {
-			t.Error(err)
-		}
-	}
-	if err = file.Close(); err != nil {
-		t.Error(err)
-	}
-	return file
-}
-
-func prepareDirs(t *testing.T) (string, string) {
-	downloadDir, err := ioutil.TempDir("", "sharer")
-	if err != nil {
-		t.Error(err)
-	}
-	base, err := ioutil.TempDir("", "sharer")
-	if err != nil {
-		t.Error(err)
-	}
-
-	return downloadDir, base
 }
 
 func TestRemoveNode(t *testing.T) {

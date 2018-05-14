@@ -67,8 +67,7 @@ func (s *ShareUploader) accept(sf *commonData.SharedFile, chunkChecksum string, 
 	s.sender.SendCallback(data.DownloadRequestResultCmd, requestResult, id, func() {
 		// could not send data
 		log.Println("Could not send download request result!")
-		s.uploadFail()
-		return
+		// do not have to release upload token, because it get released on connection timeout
 	})
 	// wait for other client to connect then upload chunk data
 	// set timeout
