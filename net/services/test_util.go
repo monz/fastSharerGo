@@ -1,13 +1,22 @@
 package net
 
 import (
+	"encoding/json"
+	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
+	"github.com/monz/fastSharerGo/net/data"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+)
+
+const (
+	infoPeriod   = 500 * time.Millisecond
+	maxUploads   = 5
+	maxDownloads = 5
 )
 
 func createSharedFile(t *testing.T, parentDir string) *commonData.SharedFile {
@@ -56,4 +65,25 @@ func prepareDirs(t *testing.T) (string, string) {
 	}
 
 	return downloadDir, base
+}
+
+func sfTransferred(t *testing.T, sf *commonData.SharedFile) commonData.SharedFile {
+	bytes, err := json.Marshal(sf)
+	if err != nil {
+		t.Error(err)
+	}
+	var sfTransferred commonData.SharedFile
+	err = json.Unmarshal(bytes, &sfTransferred)
+	if err != nil {
+		t.Error(err)
+	}
+	return sfTransferred
+}
+
+func createShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, downloadDir string) *ShareService {
+	sender := NewShareSender(senderChan)
+	uploader := NewShareUploader(localNodeId, maxUploads, sender)
+	downloader := NewShareDownloader(localNodeId, maxDownloads, sender)
+	shareService := NewShareService(localNodeId, sender, uploader, downloader, infoPeriod, downloadDir)
+	return shareService
 }

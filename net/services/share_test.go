@@ -15,12 +15,6 @@ import (
 	"time"
 )
 
-const (
-	infoPeriod   = 500 * time.Millisecond
-	maxUploads   = 5
-	maxDownloads = 5
-)
-
 func TestReceivedDownloadRequestDenyUploadFileNotShared(t *testing.T) {
 	// prepare share service parameter
 	localNodeId := uuid.New()
@@ -30,7 +24,7 @@ func TestReceivedDownloadRequestDenyUploadFileNotShared(t *testing.T) {
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
 
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+	shareService := createShareService(localNodeId, sender, downloadDir)
 
 	// prepare download request of unknown file
 	fileId := uuid.New().String()
@@ -60,7 +54,7 @@ func TestReceivedDownloadRequestDenyUploadChunkUnknown(t *testing.T) {
 	defer os.RemoveAll(base)
 
 	// create share service
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+	shareService := createShareService(localNodeId, sender, downloadDir)
 
 	// prepare shared file
 	sf := createSharedFile(t, base)
@@ -106,7 +100,8 @@ func TestReceivedDownloadRequestResultAcceptUploadLocalFileSharedDirectory(t *te
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
 
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+	// create share service
+	shareService := createShareService(localNodeId, sender, downloadDir)
 
 	// prepare shared file
 	sf := createSharedFile(t, base)
@@ -181,6 +176,45 @@ func TestReceivedDownloadRequestResultAcceptUploadPartialFileDownloadDirectory(t
 	// todo: implement
 	// upload chunk of file which is not local yet, only partially downloaded, from download directory
 }
+
+// send partial shared file with empty chunk list
+// in second message send complete shared file info
+// expected and actual chunk count must match
+// todo: implement
+//func TestReceivedShareListConsolidateEmptyChunks(t *testing.T) {
+//	// prepare share service parameter
+//	localNodeId := uuid.New()
+//	sender := make(chan data.ShareCommand)
+//
+//	// prepare dirs
+//	downloadDir, base := prepareDirs(t)
+//	defer os.RemoveAll(downloadDir)
+//	defer os.RemoveAll(base)
+//
+//	// create share service
+//	shareService := createShareService(localNodeId, sender, downloadDir)
+//
+//	// prepare shared file
+//	sf := createSharedFile(t, base)
+//	defer os.Remove(sf.FilePath())
+//
+//	// add empty chunk
+//	sf.AddChunk(commonData.NewChunk(sf.FileId(), 0, 0))
+//
+//	// marshal/unmarshal to get correct shared file state
+//	remoteSf := sfTransferred(t, sf)
+//	shareService.AddLocalSharedFile(remoteSf)
+//
+//	// start message reader for message
+//	done := make(chan bool)
+//	go acceptUpload(t, done, sender)
+//
+//	// call receivedDownloadRequest method
+//	shareService.ReceivedShareList(remoteSf)
+//
+//	// wait for message
+//	<-done
+//}
 
 //func TestReceivedShareListFirstTimeSeen(t *testing.T) {
 //	// todo: implement
@@ -284,7 +318,8 @@ func TestSendingCompleteMsg(t *testing.T) {
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
 
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+	// create share service
+	shareService := createShareService(localNodeId, sender, downloadDir)
 
 	// prepare local file, so that share information get send to other nodes
 	sf := createSharedFile(t, base)
@@ -319,7 +354,8 @@ func TestAddNodeAddShareInfo(t *testing.T) {
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
 
-	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
+	// create share service
+	shareService := createShareService(localNodeId, sender, downloadDir)
 
 	// add local file, so that share information get send to other nodes
 	sf := createSharedFile(t, base)

@@ -45,7 +45,12 @@ func main() {
 	// subscribe to node message updates from discovery service
 	discoService.Register(netService)
 
-	shareService := nnet.NewShareService(netService.LocalNodeId(), netService.Sender(), shareInfoPeriod, downloadDir, maxUploads, maxDownloads)
+	// prepare dependencies for share service
+	sender := nnet.NewShareSender(netService.Sender())
+	uploader := nnet.NewShareUploader(netService.LocalNodeId(), maxUploads, sender)
+	downloader := nnet.NewShareDownloader(netService.LocalNodeId(), maxDownloads, sender)
+
+	shareService := nnet.NewShareService(netService.LocalNodeId(), sender, uploader, downloader, shareInfoPeriod, downloadDir)
 	shareService.Start()
 	// subscribe to share message updates from network service
 	netService.Register(shareService)

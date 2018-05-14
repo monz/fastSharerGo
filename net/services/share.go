@@ -32,7 +32,7 @@ type ShareService struct {
 	mu                sync.Mutex
 }
 
-func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, infoPeriod time.Duration, downloadDir string, maxUploads int, maxDownloads int) *ShareService {
+func NewShareService(localNodeId uuid.UUID, sender Sender, uploader Uploader, downloader Downloader, infoPeriod time.Duration, downloadDir string) *ShareService {
 	s := new(ShareService)
 	s.localNodeId = localNodeId
 	s.nodes = make(map[uuid.UUID]*data.Node)
@@ -40,9 +40,9 @@ func NewShareService(localNodeId uuid.UUID, senderChan chan data.ShareCommand, i
 	s.downloadDir = downloadDir
 	s.downloadExtension = ".part" // todo: load from paramter
 	s.sharedFiles = make(map[string]*commonData.SharedFile)
-	s.sender = NewShareSender(senderChan)
-	s.uploader = NewShareUploader(localNodeId, maxUploads, s.sender)
-	s.downloader = NewShareDownloader(localNodeId, maxDownloads, s.sender)
+	s.sender = sender
+	s.uploader = uploader
+	s.downloader = downloader
 	s.fileInfoer = NewSharedFileInfoer(localNodeId, s.sender)
 	s.stopped = false
 
@@ -226,6 +226,7 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 		localSf.SetChecksum(remoteSf.Checksum())
 	}
 	// add new chunk information
+	localSf.ClearChunksWithoutChecksum()
 	for _, remoteChunk := range remoteSf.Chunks() {
 		if len(remoteChunk.Checksum()) <= 0 {
 			continue
