@@ -2,7 +2,6 @@ package net
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
@@ -12,7 +11,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -56,22 +54,18 @@ func TestReceivedDownloadRequestDenyUploadChunkUnknown(t *testing.T) {
 	localNodeId := uuid.New()
 	sender := make(chan data.ShareCommand)
 
+	// prepare dirs
 	downloadDir, base := prepareDirs(t)
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
 
+	// create share service
 	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
 
 	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
+	sf := createSharedFile(t, base)
+	defer os.Remove(sf.FilePath())
 
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
 	shareService.AddLocalSharedFile(*sf)
 
 	// prepare download request of unknown chunk
@@ -107,6 +101,7 @@ func TestReceivedDownloadRequestResultAcceptUploadLocalFileSharedDirectory(t *te
 	localNodeId := uuid.New()
 	sender := make(chan data.ShareCommand)
 
+	// prepare dirs
 	downloadDir, base := prepareDirs(t)
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
@@ -114,18 +109,10 @@ func TestReceivedDownloadRequestResultAcceptUploadLocalFileSharedDirectory(t *te
 	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
 
 	// prepare shared file
-	tmpFile := createFile(t, base)
-	defer os.Remove(tmpFile.Name())
+	sf := createSharedFile(t, base)
+	defer os.Remove(sf.FilePath())
 
-	relativePath, err := filepath.Rel(base, tmpFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
 	shareService.AddLocalSharedFile(*sf)
-	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
 
 	// prepare download request of unknown chunk
 	nodeId := uuid.New().String()
@@ -292,6 +279,7 @@ func TestSendingCompleteMsg(t *testing.T) {
 	localNodeId := uuid.New()
 	sender := make(chan data.ShareCommand)
 
+	// prepare dirs
 	downloadDir, base := prepareDirs(t)
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
@@ -299,22 +287,11 @@ func TestSendingCompleteMsg(t *testing.T) {
 	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
 
 	// prepare local file, so that share information get send to other nodes
-	testFile := createFile(t, base)
-	defer os.Remove(testFile.Name())
-	relativePath, err := filepath.Rel(base, testFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
+	sf := createSharedFile(t, base)
+	defer os.Remove(sf.FilePath())
 	// add node to share service
 	node := data.NewNode(uuid.New(), "192.168.1.1")
 	shareService.AddNode(*node)
-	// create metadata, calculate chunks
-	meta := commonData.NewFileMetadata(testFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
-	// wait for chunk calculation to finish
-	for len(sf.Checksum()) <= 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
 	// add any replica node to shared file
 	expectedReplicaNode := commonData.NewReplicaNode(node.Id(), sf.LocalChunksChecksums(), len(sf.Checksum()) > 0)
 	sf.UpdateReplicaNode(expectedReplicaNode)
@@ -337,6 +314,7 @@ func TestAddNodeAddShareInfo(t *testing.T) {
 	localNodeId := uuid.New()
 	sender := make(chan data.ShareCommand)
 
+	// prepare dirs
 	downloadDir, base := prepareDirs(t)
 	defer os.RemoveAll(downloadDir)
 	defer os.RemoveAll(base)
@@ -344,25 +322,14 @@ func TestAddNodeAddShareInfo(t *testing.T) {
 	shareService := NewShareService(localNodeId, sender, infoPeriod, downloadDir, maxUploads, maxDownloads)
 
 	// add local file, so that share information get send to other nodes
-	testFile := createFile(t, base)
-	defer os.Remove(testFile.Name())
-	relativePath, err := filepath.Rel(base, testFile.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta := commonData.NewFileMetadata(testFile.Name(), relativePath)
-	sf := commonData.NewSharedFile(meta)
+	sf := createSharedFile(t, base)
+	defer os.Remove(sf.FilePath())
 	shareService.AddLocalSharedFile(*sf)
 
 	// add node
 	node := data.NewNode(uuid.New(), "192.168.1.1")
 	shareService.AddNode(*node)
 	nodes := []data.Node{*node}
-
-	// wait for chunk calculation to finish
-	for len(sf.Checksum()) <= 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
 
 	// start reader for messages
 	done := make(chan bool)
@@ -387,20 +354,9 @@ func TestAddNodeAddShareInfo(t *testing.T) {
 	<-done
 
 	// add new shared file
-	testFile2 := createFile(t, base)
-	defer os.Remove(testFile2.Name())
-	relativePath2, err := filepath.Rel(base, testFile2.Name())
-	if err != nil {
-		t.Error(err)
-	}
-	meta2 := commonData.NewFileMetadata(testFile2.Name(), relativePath2)
-	sf2 := commonData.NewSharedFile(meta2)
+	sf2 := createSharedFile(t, base)
+	defer os.Remove(sf2.FilePath())
 	shareService.AddLocalSharedFile(*sf2)
-
-	// wait for chunk calculation to finish
-	for len(sf.Checksum()) <= 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
 
 	// start reader for messages
 	go readShareInfoMsg(t, done, 8, sender, []commonData.SharedFile{*sf, *sf2}, nodes, localNodeId)

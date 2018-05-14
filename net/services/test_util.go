@@ -20,7 +20,9 @@ func createSharedFile(t *testing.T, parentDir string) *commonData.SharedFile {
 	sf := commonData.NewSharedFile(meta)
 
 	// wait for chunk calculation
-	time.Sleep(100 * time.Millisecond)
+	for len(sf.Checksum()) <= 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	return sf
 }
