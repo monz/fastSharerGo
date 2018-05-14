@@ -18,6 +18,10 @@ import (
 	"time"
 )
 
+const (
+	downloadRescheduleDelay = 5000 // milliseconds
+)
+
 type Downloader interface {
 	RequestDownload(sf *commonData.SharedFile, filePath string)
 	Download(sf *commonData.SharedFile, chunk *commonData.Chunk, node *data.Node, downloadPort int, downloadPath string)
@@ -90,28 +94,25 @@ func (s *ShareDownloader) validateFile(sf *commonData.SharedFile, filePath strin
 	if ok := sf.ActivateValidation(); !ok {
 		return false, errors.New(fmt.Sprintf("Could not activate validation state of file '%s'\n", sf.FileName()))
 	}
+	// finish validation on function return
+	defer func() {
+		if ok := sf.DeactivateValidation(); !ok {
+			log.Println(fmt.Sprintf("Could not deactivate validation state of file '%s'\n", sf.FileName()))
+		}
+	}()
 	// check if file checksum information arrived, yet
 	if len(sf.Checksum()) <= 0 {
 		return false, errors.New(fmt.Sprintf("Coult not check checksum of file '%s', waiting for checksum\n", sf.FileName()))
 	}
 	// calculate and compare all file checksums
-	isComplete, err := fileComplete(filePath, sf.Checksum(), sf.Chunks())
+	isValid, err := compareFileChecksums(filePath, sf.Checksum(), sf.Chunks())
 	if err != nil {
 		return false, err
 	}
-	if isComplete {
+	if isValid {
 		sf.SetAllChunksLocal(true)
 	}
-	log.Printf("State of file: existing = '%t', isComplete = '%t'\n", true, isComplete)
-	isValid := false
-	if isComplete {
-		log.Println("File is valid")
-		isValid = true
-	}
-	// finish validation
-	if ok := sf.DeactivateValidation(); !ok {
-		return false, errors.New(fmt.Sprintf("Could not deactivate validation state of file '%s'\n", sf.FileName()))
-	}
+	log.Printf("State of file: existing = '%t', isValid = '%t'\n", true, isValid)
 
 	return isValid, nil
 }
@@ -126,7 +127,7 @@ func fileExists(filePath string) bool {
 	return exists
 }
 
-func fileComplete(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
+func compareFileChecksums(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
 	checksums := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		checksum, err := util.CalculateChecksum(filePath, chunk.Offset(), chunk.Size())
@@ -149,11 +150,6 @@ func enoughSpace(filePath string) bool {
 func (s *ShareDownloader) scheduleDownload(sf *commonData.SharedFile, initialDelay time.Duration) {
 	log.Printf("Request download for sharedFile %p\n", sf)
 
-	// set download state of shared file to active
-	if ok := sf.ActivateDownload(); !ok {
-		log.Printf("Could not activate download of file '%s', already active\n", sf.FileName())
-	}
-
 	// delay download request
 	time.Sleep(initialDelay * time.Millisecond)
 
@@ -174,7 +170,7 @@ func (s *ShareDownloader) scheduleDownload(sf *commonData.SharedFile, initialDel
 			// reschedule download job
 			log.Println("Reschedule download job")
 			s.downloadFail(nil)
-			go s.scheduleDownload(sf, 500)
+			go s.scheduleDownload(sf, downloadRescheduleDelay)
 			return
 		}
 
@@ -200,15 +196,18 @@ func (s *ShareDownloader) scheduleDownload(sf *commonData.SharedFile, initialDel
 		chunkCount = len(sf.ChunksToDownload())
 	}
 	// no more download information, check whether file is completely downloaded
-	if chunkCount <= 0 && !sf.IsLocal() {
-		log.Println("No chunks to download, but files is not local yet, waiting for more information!")
+	isFileLocal := sf.IsLocal()
+	if chunkCount <= 0 && !isFileLocal {
+		log.Println("No chunks to download, but file is not local yet, waiting for more information!")
 		// reschedule download job
 		log.Println("Reschedule download job")
-		go s.scheduleDownload(sf, 1500) // todo: reduce time to 500ms
+		go s.scheduleDownload(sf, downloadRescheduleDelay)
 		return
-	} else if chunkCount <= 0 && sf.IsLocal() {
+	} else if chunkCount <= 0 && isFileLocal {
 		log.Printf("Download of file '%s' finished.\n", sf.FileName())
 		return
+	} else {
+		log.Fatal("Should never be reached!")
 	}
 }
 

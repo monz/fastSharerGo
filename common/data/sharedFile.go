@@ -167,7 +167,7 @@ func (sf *SharedFile) DeactivateValidation() bool {
 func (sf *SharedFile) IsValidationActive() bool {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
-	return sf.downloadActive
+	return sf.validationActive
 }
 
 func (sf *SharedFile) AddChunk(chunk *Chunk) {
