@@ -6,7 +6,6 @@ import (
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
-	"log"
 	"os"
 	"path/filepath"
 	"testing"
