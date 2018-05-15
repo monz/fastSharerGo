@@ -48,6 +48,11 @@ func (f FileMetadata) Name() string {
 func (f *FileMetadata) AddChunk(chunk *Chunk) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// only add valid chunks
+	if len(chunk.Checksum()) <= 0 {
+		return
+	}
+	// only add new chunks
 	isAbsent := true
 	for _, c := range f.FileChunks {
 		if c.Checksum() == chunk.Checksum() {
