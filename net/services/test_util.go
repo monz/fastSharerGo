@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
+	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
 	"io/ioutil"
 	"math/rand"
@@ -27,7 +28,11 @@ func createSharedFile(t *testing.T, parentDir string) *commonData.SharedFile {
 	}
 	meta := commonData.NewFileMetadata(tmpFile.Name(), relativePath)
 	sf := commonData.NewSharedFile(meta)
-
+	fileChecksum, chunks := util.FileChecksums(sf.FileId(), sf.FilePath(), sf.FileSize())
+	sf.SetChecksum(fileChecksum)
+	for _, c := range chunks {
+		meta.AddChunk(c)
+	}
 	// wait for chunk calculation
 	for len(sf.Checksum()) <= 0 {
 		time.Sleep(10 * time.Millisecond)

@@ -105,10 +105,7 @@ func (s *ShareDownloader) validateFile(sf *commonData.SharedFile, filePath strin
 		return false, errors.New(fmt.Sprintf("Coult not check checksum of file '%s', waiting for checksum\n", sf.FileName()))
 	}
 	// calculate and compare all file checksums
-	isValid, err := compareFileChecksums(filePath, sf.Checksum(), sf.Chunks())
-	if err != nil {
-		return false, err
-	}
+	isValid := util.CompareFileChecksums(sf.FileId(), filePath, sf.FileSize(), sf.Checksum())
 	if isValid {
 		sf.SetAllChunksLocal(true)
 	}
@@ -125,21 +122,6 @@ func fileExists(filePath string) bool {
 		exists = true
 	}
 	return exists
-}
-
-func compareFileChecksums(filePath string, checksum string, chunks []*commonData.Chunk) (bool, error) {
-	checksums := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		checksum, err := util.CalculateChecksum(filePath, chunk.Offset(), chunk.Size())
-		if err != nil {
-			return false, err
-		}
-		checksums = append(checksums, checksum)
-	}
-	calculatedChecksum := util.SumOfChecksums(checksums)
-
-	log.Printf("FileComplete: expectedSum = %s, actualSum = %s\n", checksum, calculatedChecksum)
-	return checksum == calculatedChecksum, nil
 }
 
 func enoughSpace(filePath string) bool {
@@ -223,14 +205,13 @@ func (s *ShareDownloader) nextDownloadInformation(sf *commonData.SharedFile) (no
 
 	chunkDist := make(map[string][]commonData.ReplicaNode)
 	for _, c := range chunks {
-		log.Printf("In nextDownload chunk %p\n", c)
-		replicaNodes := sf.ReplicaNodesByChunk(c.Checksum())
+		replicaNodes := sf.ReplicaNodesByChunk(c)
 		if len(replicaNodes) <= 0 {
 			continue
 		}
-		_, ok := chunkDist[c.Checksum()]
+		_, ok := chunkDist[c]
 		if !ok {
-			chunkDist[c.Checksum()] = replicaNodes
+			chunkDist[c] = replicaNodes
 		}
 	}
 	if len(chunkDist) <= 0 {
@@ -251,8 +232,12 @@ func (s *ShareDownloader) nextDownloadInformation(sf *commonData.SharedFile) (no
 	// refactor 'nextDownloadInformation' function because of the following
 	// have to search for chunk object, there might be a better solution
 	for _, c := range chunks {
-		if c.Checksum() == chunkSum {
-			chunk = c
+		if c == chunkSum {
+			var ok bool
+			chunk, ok = sf.ChunkById(c) // cannot use ':=' outer 'chunk' maybe gets shadowed
+			if !ok {
+				return nodeId, chunk, errors.New("Chunk not found")
+			}
 			break
 		}
 	}

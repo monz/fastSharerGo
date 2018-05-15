@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/fsnotify/fsnotify"
 	"github.com/monz/fastSharerGo/common/data"
+	"github.com/monz/fastSharerGo/common/services"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,10 +15,11 @@ type FileDiscoveryService struct {
 	watchedDirectories map[string]bool
 	watcher            *fsnotify.Watcher
 	subscriber         []data.DirectoryChangeSubscriber
+	checksumService    util.ChecksumService
 	mu                 sync.Mutex
 }
 
-func NewFileDiscoveryService(dir string, recursive bool) *FileDiscoveryService {
+func NewFileDiscoveryService(checksumService util.ChecksumService, dir string, recursive bool) *FileDiscoveryService {
 	f := new(FileDiscoveryService)
 	f.watchedDirectories = make(map[string]bool)
 	// add valid path
@@ -26,6 +28,7 @@ func NewFileDiscoveryService(dir string, recursive bool) *FileDiscoveryService {
 	} else if err == nil {
 		f.watchedDirectories[dir] = recursive
 	}
+	f.checksumService = checksumService
 
 	return f
 }
@@ -233,6 +236,8 @@ func (f *FileDiscoveryService) handleFile(path string, relativePath string) erro
 	// create shared file object
 	fileMetadata := data.NewFileMetadata(path, relativePath)
 	sf := data.NewSharedFile(fileMetadata)
+	// calculate file/chunk checksums async
+	f.checksumService.SetFileChecksums(fileMetadata)
 
 	f.updateDirectoryChange(*sf)
 

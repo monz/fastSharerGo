@@ -2,7 +2,6 @@ package data
 
 import (
 	"github.com/google/uuid"
-	"github.com/monz/fastSharerGo/common/services"
 	"log"
 	"os"
 	"sync"
@@ -38,27 +37,8 @@ func newFileMetadata(fileId string, filePath string, relativePath string) *FileM
 
 	f.FileName = fileInfo.Name()
 	f.FileSize = fileInfo.Size()
-	f.FileChunks = GetChunks(f.FileId, f.FileSize)
-	go f.calculateChecksums()
 
 	return f
-}
-
-func (f *FileMetadata) calculateChecksums() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	checksums := make([]string, 0, len(f.FileChunks))
-	for _, c := range f.FileChunks {
-		checksum, err := util.CalculateChecksum(f.FilePath, c.Offset(), c.Size())
-		if err != nil {
-			log.Fatal(err)
-		}
-		c.SetChecksum(checksum)
-		c.SetLocal(true)
-		checksums = append(checksums, checksum)
-	}
-	f.FileChecksum = util.SumOfChecksums(checksums)
 }
 
 func (f FileMetadata) Name() string {
@@ -94,8 +74,19 @@ func (f *FileMetadata) ClearChunksWithoutChecksum() {
 	f.FileChunks = cleaned
 }
 
-func (f FileMetadata) Chunks() []*Chunk {
-	return f.FileChunks
+func (f *FileMetadata) Chunks() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	chunks := make([]string, 0, len(f.FileChunks))
+	for _, c := range f.FileChunks {
+		chunks = append(chunks, c.Checksum())
+	}
+
+	return chunks
+}
+
+func (f *FileMetadata) ChunkCount() int {
+	return len(f.FileChunks)
 }
 
 func (f FileMetadata) Checksum() string {
@@ -145,6 +136,15 @@ func (f FileMetadata) AllChunksLocal() bool {
 	return allChunksLocal
 }
 
+func (f *FileMetadata) SetAllChunksLocal(isLocal bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, c := range f.FileChunks {
+		c.SetLocal(isLocal)
+	}
+}
+
 func (f FileMetadata) ChunkById(chunkChecksum string) (chunk *Chunk, ok bool) {
 	for _, c := range f.FileChunks {
 		if c.Checksum() == chunkChecksum {
@@ -156,7 +156,9 @@ func (f FileMetadata) ChunkById(chunkChecksum string) (chunk *Chunk, ok bool) {
 	return chunk, ok
 }
 
-func (f FileMetadata) LocalChunksChecksums() []string {
+func (f *FileMetadata) LocalChunksChecksums() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	sums := make([]string, 0, len(f.FileChunks))
 	for _, c := range f.FileChunks {
 		if c.IsLocal() {
@@ -164,4 +166,16 @@ func (f FileMetadata) LocalChunksChecksums() []string {
 		}
 	}
 	return sums
+}
+
+func (f *FileMetadata) ChunksToDownload() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	chunks := make([]string, 0, len(f.FileChunks))
+	for _, c := range f.FileChunks {
+		if !c.IsLocal() && !c.IsDownloadActive() && len(c.Checksum()) > 0 {
+			chunks = append(chunks, c.Checksum())
+		}
+	}
+	return chunks
 }

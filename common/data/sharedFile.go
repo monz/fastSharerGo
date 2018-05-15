@@ -42,6 +42,10 @@ func (sf *SharedFile) SetFileRelativePath(filePath string) {
 	sf.FileMetadata.SetFileRelativePath(filePath)
 }
 
+func (sf SharedFile) FileSize() int64 {
+	return sf.FileMetadata.Size()
+}
+
 func (sf *SharedFile) Checksum() string {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
@@ -188,35 +192,19 @@ func (sf *SharedFile) ClearChunksWithoutChecksum() {
 	sf.FileMetadata.ClearChunksWithoutChecksum()
 }
 
-func (sf *SharedFile) Chunks() []*Chunk {
+func (sf *SharedFile) Chunks() []string {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 	return sf.FileMetadata.Chunks()
 }
 
-func (sf *SharedFile) ChunkSums() []string {
+func (sf *SharedFile) ChunksToDownload() []string {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	chunks := sf.FileMetadata.Chunks()
-	var sums = make([]string, 0, len(chunks))
-	for _, c := range chunks {
-		sums = append(sums, c.Checksum())
-	}
-	return sums
-}
-
-func (sf *SharedFile) ChunksToDownload() []*Chunk {
-	sf.mu.Lock()
-	defer sf.mu.Unlock()
-
-	var chunks []*Chunk
+	var chunks []string
 	if len(sf.FileMetadata.Chunks()) > 0 && !sf.IsLocal() {
-		for _, c := range sf.FileMetadata.Chunks() {
-			if !c.IsLocal() && !c.IsDownloadActive() && len(c.Checksum()) > 0 {
-				chunks = append(chunks, c)
-			}
-		}
+		chunks = sf.FileMetadata.ChunksToDownload()
 	}
 
 	return chunks
@@ -225,10 +213,7 @@ func (sf *SharedFile) ChunksToDownload() []*Chunk {
 func (sf *SharedFile) SetAllChunksLocal(isLocal bool) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
-
-	for _, c := range sf.FileMetadata.Chunks() {
-		c.SetLocal(isLocal)
-	}
+	sf.FileMetadata.SetAllChunksLocal(isLocal)
 }
 
 func (sf SharedFile) ReplicaNodesByChunk(chunkChecksum string) []ReplicaNode {

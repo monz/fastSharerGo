@@ -1,6 +1,7 @@
 package net
 
 import (
+	"errors"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	tools "github.com/monz/fastSharerGo/common/util"
@@ -227,11 +228,14 @@ func (s *ShareService) consolidateSharedFileInfo(localSf *commonData.SharedFile,
 	}
 	// add new chunk information
 	localSf.ClearChunksWithoutChecksum()
-	for _, remoteChunk := range remoteSf.Chunks() {
-		if len(remoteChunk.Checksum()) <= 0 {
+	for _, remoteChunkSum := range remoteSf.Chunks() {
+		if len(remoteChunkSum) <= 0 {
 			continue
 		}
-		log.Println("In Consolidate, chunk state:", remoteChunk.IsLocal())
+		remoteChunk, ok := remoteSf.ChunkById(remoteChunkSum)
+		if !ok {
+			return errors.New("Chunk not found")
+		}
 		localSf.AddChunk(remoteChunk)
 	}
 	return nil

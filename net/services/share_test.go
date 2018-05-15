@@ -453,7 +453,7 @@ Loop:
 				if sf.FileId() == sfActual.FileId() {
 					foundExpectedFile = true
 					// replica node must contain chunk information of shared file
-					for _, chunkSum := range sf.ChunkSums() {
+					for _, chunkSum := range sf.Chunks() {
 						if !replicaNode.Contains(chunkSum) {
 							t.Errorf("Replica node is missing chunk: '%s'\n", chunkSum)
 							break

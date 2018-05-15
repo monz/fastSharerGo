@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/local/services"
 	nnet "github.com/monz/fastSharerGo/net/services"
 	"log"
@@ -18,6 +19,7 @@ var discoveryPort int
 var discoveryPeriod time.Duration
 var maxDownloads int
 var maxUploads int
+var checksumWorker int
 
 func init() {
 	flag.DurationVar(&shareInfoPeriod, "shareInfoPeriod", 5*time.Second, "number of seconds shared file info messages get send")
@@ -29,6 +31,7 @@ func init() {
 	flag.DurationVar(&discoveryPeriod, "discoPeriod", 5*time.Second, "number of seconds discovery messages get send")
 	flag.IntVar(&maxDownloads, "maxDown", 5, "max concurrent download connections")
 	flag.IntVar(&maxUploads, "maxUp", 5, "max concurrent upload connections")
+	flag.IntVar(&checksumWorker, "sumWorker", 1, "max concurrent checksum worker")
 }
 
 // todo: load all settings from config file or cmd line
@@ -57,7 +60,8 @@ func main() {
 	// subscribe to node message updates from dicovery service
 	discoService.Register(shareService)
 
-	fileDiscoService := local.NewFileDiscoveryService(shareDir, shareDirRecursive)
+	checksumService := util.NewShareChecksumService(checksumWorker)
+	fileDiscoService := local.NewFileDiscoveryService(checksumService, shareDir, shareDirRecursive)
 	// subscribe to file change updates from file discovery service
 	// register subscriber before start, because they get directly informed when services starts
 	fileDiscoService.Register(shareService)

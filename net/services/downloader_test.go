@@ -6,6 +6,7 @@ import (
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/common/services"
 	"github.com/monz/fastSharerGo/net/data"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -160,7 +161,7 @@ func TestRequestFileExistsNotValidDelteExisting(t *testing.T) {
 	// no chunks downloaded yet
 	sf.SetAllChunksLocal(false)
 	// add replica node which shares the file
-	replicaNode := commonData.NewReplicaNode(uuid.New(), sf.ChunkSums(), true)
+	replicaNode := commonData.NewReplicaNode(uuid.New(), sf.Chunks(), true)
 	sf.UpdateReplicaNode(replicaNode)
 
 	// request download of shared file
