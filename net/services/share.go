@@ -114,6 +114,8 @@ func (s *ShareService) ReceivedDownloadRequestResult(requestResult data.Download
 
 func (s *ShareService) download(rr data.DownloadRequestResult) {
 	// check if requested chunk is local
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sf, ok := s.sharedFiles[rr.FileId()]
 	if !ok {
 		log.Println("Could not find shared file")
