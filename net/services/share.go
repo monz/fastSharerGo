@@ -181,6 +181,8 @@ func (s *ShareService) requestDownload(remoteSf commonData.SharedFile) {
 }
 
 func (s *ShareService) updateSharedFileList(remoteSf *commonData.SharedFile) (*commonData.SharedFile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sf, ok := s.sharedFiles[remoteSf.FileId()]
 	if ok {
 		// update
