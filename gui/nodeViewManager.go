@@ -9,14 +9,14 @@ import (
 	"sync"
 )
 
-type NodeManager struct {
+type NodeViewMgr struct {
 	ViewManager // inherit ViewManager
 	nodes       map[uuid.UUID]*data.Node
 	mu          sync.Mutex
 }
 
-func NewNodeManager(name, title string, editable, wrap, autoscroll bool, x0, y0, x1, y1 int) *NodeManager {
-	m := new(NodeManager)
+func NewNodeViewMgr(name, title string, editable, wrap, autoscroll bool, x0, y0, x1, y1 int) *NodeViewMgr {
+	m := new(NodeViewMgr)
 	m.name = name
 	m.title = title
 	m.editable = editable
@@ -31,7 +31,7 @@ func NewNodeManager(name, title string, editable, wrap, autoscroll bool, x0, y0,
 	return m
 }
 
-func (m *NodeManager) Update(g *gocui.Gui, node *data.Node) {
+func (m *NodeViewMgr) Update(g *gocui.Gui, node *data.Node) {
 	// create ui
 	if err := m.Layout(g); err != nil {
 		log.Fatal(err)

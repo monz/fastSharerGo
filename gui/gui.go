@@ -1,22 +1,29 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/jroimartin/gocui"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/net/data"
 	"log"
+	"time"
 )
 
 type Ui interface {
-	Show()
-	Init()
+	Show(logBuffer *bytes.Buffer)
+	Init() error
+	// must implement interfaces
+	data.ShareSubscriber
+	data.NodeSubscriber
+	commonData.DirectoryChangeSubscriber
 }
 
 type ShareUi struct {
 	g                 *gocui.Gui
 	sharedFileManager *SharedFileViewMgr
-	nodeManager       *NodeManager
+	nodeManager       *NodeViewMgr
+	logManager        *LogViewMgr
 }
 
 func NewShareUi() *ShareUi {
@@ -29,20 +36,41 @@ func NewShareUi() *ShareUi {
 	return ui
 }
 
-func (ui *ShareUi) Show() {
+func (ui *ShareUi) Show(logBuffer *bytes.Buffer) {
 	// close ui when quitting
 	defer ui.g.Close()
 
-	if err := ui.g.MainLoop(); err != nil && err != gocui.ErrQuit {
-		log.Panicln(err)
+	// start main gui loop
+	done := make(chan bool)
+	go func() {
+		if err := ui.g.MainLoop(); err != nil {
+			if err != gocui.ErrQuit {
+				log.Panicln(err)
+			}
+		}
+		done <- true
+	}()
+	// only after main loop starts, views can be found
+	// set global logger to log view
+	time.Sleep(100 * time.Millisecond)
+	v, err := ui.g.View(ui.logManager.Name())
+	if err != nil {
+		log.Fatal(err)
 	}
+	log.SetOutput(v)
+	// write saved log entries to log view
+	ui.logManager.Update(ui.g, logBuffer)
+	// wait until user quits gui
+	<-done
 }
 
 func (ui *ShareUi) Init() error {
 	maxX, maxY := ui.g.Size()
 	ui.sharedFileManager = NewSharedFileViewMgr("sharedFiles", "Shared Files", false, true, true, 0, 0, maxX/2-1, maxY/2-1)
-	ui.nodeManager = NewNodeManager("nodes", "Nodes", false, true, true, maxX/2, 0, maxX-1, maxY/2-1)
-	ui.g.SetManager(ui.sharedFileManager)
+	ui.nodeManager = NewNodeViewMgr("nodes", "Nodes", false, true, true, maxX/2, 0, maxX-1, maxY/2-1)
+	ui.logManager = NewLogViewMgr("log", "Log", false, true, true, 0, maxY/2, maxX-1, maxY-1)
+	ui.g.SetManager(ui.sharedFileManager, ui.nodeManager, ui.logManager)
+
 	return ui.setKeyBindings()
 }
 

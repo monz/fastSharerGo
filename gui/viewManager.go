@@ -29,3 +29,7 @@ func (m ViewManager) Layout(g *gocui.Gui) error {
 	}
 	return nil
 }
+
+func (m ViewManager) Name() string {
+	return m.name
+}
