@@ -194,7 +194,17 @@ func (s *ShareService) updateSharedFileList(remoteSf *commonData.SharedFile) (*c
 		// add
 		log.Printf("First added shared file information of file '%s'\n", remoteSf.FileName())
 		sf = remoteSf
-		sf.ClearReplicaNodes() // fix: needs another solution, deletes replica nodes in remoteSf, too, due to reference
+
+		// clear remote replica nodes from local node and unknown nodes
+		nodesToDelete := []uuid.UUID{s.localNodeId}
+		for _, replicaNode := range remoteSf.ReplicaNodes() {
+			_, ok := s.nodes[replicaNode.Id()]
+			if !ok {
+				nodesToDelete = append(nodesToDelete, replicaNode.Id())
+			}
+		}
+		sf.ClearReplicaNodes(nodesToDelete)
+
 		if err := s.consolidateSharedFileInfo(sf, remoteSf); err != nil {
 			return nil, err
 		}

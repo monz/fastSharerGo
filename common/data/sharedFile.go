@@ -180,10 +180,12 @@ func (sf *SharedFile) AddChunk(chunk *Chunk) {
 	sf.FileMetadata.AddChunk(chunk)
 }
 
-func (sf *SharedFile) ClearReplicaNodes() {
+func (sf *SharedFile) ClearReplicaNodes(nodesToDelete []uuid.UUID) {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
-	sf.FileReplicaNodes = make(map[uuid.UUID]*ReplicaNode)
+	for _, node := range nodesToDelete {
+		delete(sf.FileReplicaNodes, node)
+	}
 }
 
 func (sf *SharedFile) ClearChunksWithoutChecksum() {
