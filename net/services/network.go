@@ -2,11 +2,11 @@ package net
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	commonData "github.com/monz/fastSharerGo/common/data"
 	"github.com/monz/fastSharerGo/net/data"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -167,13 +167,13 @@ func (n *NetworkService) acceptConnections() {
 }
 
 func (n *NetworkService) handleConnection(conn net.Conn) {
-	scanner := bufio.NewScanner(conn)
+	reader := bufio.NewReader(conn)
 	for {
-		cmd, ok, err := readCommand(scanner)
+		cmd, err := readCommand(reader)
 		if err != nil {
 			log.Println("Could not read ShareCommand!")
 			log.Println(err)
-			if !ok {
+			if err == io.EOF {
 				conn.Close()
 				break
 			}
@@ -229,27 +229,18 @@ func printCmd(cmd data.ShareCommand) {
 	}
 }
 
-// returns read shareCommand, scanner still holds data and error
-// if reached EOF, returns shareCommand=nil, moreData=false, error=EOF
-func readCommand(r *bufio.Scanner) (*data.ShareCommand, bool, error) {
-	var line string
-
-	// maybe dont use scanner, just need []byte
-	if ok := r.Scan(); ok {
-		line = r.Text()
+func readCommand(r *bufio.Reader) (*data.ShareCommand, error) {
+	if line, err := r.ReadString('\n'); err == nil {
 		log.Println("Read line:", line)
 
 		cmd := data.NewEmptyShareCommand()
 		err := data.DeserializeShareCommand([]byte(line), cmd)
 		if err != nil {
-			return nil, ok, err
+			return nil, err
 		}
-		return cmd, ok, nil
+		return cmd, nil
 
 	} else {
-		if err := r.Err(); err != nil {
-			return nil, ok, err
-		}
+		return nil, err
 	}
-	return nil, false, errors.New("Reached EOF")
 }
