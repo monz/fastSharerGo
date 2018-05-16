@@ -27,6 +27,10 @@ func NewSharedFileInfoer(localNodeId uuid.UUID, sender Sender) *SharedFileInfoer
 func (s *SharedFileInfoer) SendFileInfo(sf commonData.SharedFile, nodeId uuid.UUID) {
 	// add local node as replica node for all local chunks
 	chunkSums := sf.LocalChunksChecksums()
+	// only send shared file info containing chunk information
+	if len(chunkSums) <= 0 {
+		return
+	}
 	localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
 	sf.UpdateReplicaNode(localNode)
 
