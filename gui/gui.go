@@ -103,15 +103,21 @@ func (ui *ShareUi) ReceivedDownloadRequestResult(rr data.DownloadRequestResult) 
 
 // implement share subscriber interface
 func (ui *ShareUi) ReceivedShareList(sf commonData.SharedFile) {
-	// add missing files, only
-	if _, ok := ui.sharedFileManager.sharedFiles[sf.FileId()]; !ok {
-		ui.sharedFileManager.sharedFiles[sf.FileId()] = &sf
-	}
-	ui.sharedFileManager.Update(ui.g, &sf)
+	ui.updateSharedFile(sf)
 }
 
 // implement directory change subscriber interface
 func (ui *ShareUi) AddLocalSharedFile(sf commonData.SharedFile) {
+	ui.updateSharedFile(sf)
+}
+
+func (ui *ShareUi) updateSharedFile(sf commonData.SharedFile) {
+	ui.sharedFileManager.mu.Lock()
+	defer ui.sharedFileManager.mu.Unlock()
+	// add missing files, only
+	if _, ok := ui.sharedFileManager.sharedFiles[sf.FileId()]; !ok {
+		ui.sharedFileManager.sharedFiles[sf.FileId()] = &sf
+	}
 	ui.sharedFileManager.Update(ui.g, &sf)
 }
 

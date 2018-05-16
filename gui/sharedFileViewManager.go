@@ -8,6 +8,12 @@ import (
 	"sync"
 )
 
+type fileInfo struct {
+	name            string
+	chunkCount      int
+	toDownloadCount int
+}
+
 type SharedFileViewMgr struct {
 	ViewManager // inherit ViewManager
 	sharedFiles map[string]*commonData.SharedFile
@@ -31,21 +37,23 @@ func NewSharedFileViewMgr(name, title string, editable, wrap, autoscroll bool, x
 }
 
 func (m *SharedFileViewMgr) Update(g *gocui.Gui, sf *commonData.SharedFile) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	// create ui
 	if err := m.Layout(g); err != nil {
 		log.Fatal(err)
 	}
 	// update ui
+	sfs := make([]fileInfo, 0, len(m.sharedFiles))
+	for _, sf := range m.sharedFiles {
+		sfs = append(sfs, fileInfo{sf.FileName(), len(sf.Chunks()), len(sf.ChunksToDownload())})
+	}
 	g.Update(func(g *gocui.Gui) error {
 		v, err := g.View(m.name)
 		if err != nil {
 			log.Fatal(err)
 		}
 		v.Clear()
-		for _, sf := range m.sharedFiles {
-			fmt.Fprintf(v, "File: %20.20s \t| Chunks: %5d \t| ToDownload: %5d\n", Truncate(sf.FileName(), 20), len(sf.Chunks()), len(sf.ChunksToDownload()))
+		for _, info := range sfs {
+			fmt.Fprintf(v, "File: %20.20s \t| Chunks: %5d \t| ToDownload: %5d\n", Truncate(info.name, 20), info.chunkCount, info.toDownloadCount)
 		}
 		return nil
 	})
