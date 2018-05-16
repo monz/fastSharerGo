@@ -145,7 +145,9 @@ func (n *NetworkService) Start() {
 
 func (n *NetworkService) Stop() {
 	n.stopped = true
-	n.cmdSocket.Close()
+	if n.cmdSocket != nil {
+		n.cmdSocket.Close()
+	}
 }
 
 func (n *NetworkService) acceptConnections() {
