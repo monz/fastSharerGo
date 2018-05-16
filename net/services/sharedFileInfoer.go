@@ -8,6 +8,7 @@ import (
 
 type FileInfoer interface {
 	SendFileInfo(commonData.SharedFile, uuid.UUID)
+	SendFilesInfo([]commonData.SharedFile, uuid.UUID)
 	SendCompleteMsg(commonData.SharedFile, uuid.UUID)
 }
 
@@ -22,6 +23,23 @@ func NewSharedFileInfoer(localNodeId uuid.UUID, sender Sender) *SharedFileInfoer
 	s.sender = sender
 
 	return s
+}
+
+func (s *SharedFileInfoer) SendFilesInfo(sfs []commonData.SharedFile, nodeId uuid.UUID) {
+	files := make([]interface{}, 0, len(sfs))
+	for _, sf := range sfs {
+		// add local node as replica node for all local chunks
+		chunkSums := sf.LocalChunksChecksums()
+		// only consider shared files containing chunk information for sending information message
+		if len(chunkSums) <= 0 {
+			continue
+		}
+		localNode := commonData.NewReplicaNode(s.localNodeId, chunkSums, sf.IsLocal())
+		sf.UpdateReplicaNode(localNode)
+		files = append(files, sf)
+	}
+	// send data
+	s.sender.Send(data.PushShareListCmd, files, nodeId, "Could not send shared file info")
 }
 
 func (s *SharedFileInfoer) SendFileInfo(sf commonData.SharedFile, nodeId uuid.UUID) {

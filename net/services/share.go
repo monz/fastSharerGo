@@ -64,12 +64,12 @@ func (s *ShareService) sendSharedFileInfo() {
 	log.Println("Starting info service for shared files")
 	for !s.stopped {
 		s.mu.Lock()
-		for _, sf := range s.sharedFiles {
-			for _, node := range s.nodes {
+		for _, node := range s.nodes {
+			files := make([]commonData.SharedFile, 0, len(s.sharedFiles))
+			for _, sf := range s.sharedFiles {
 				replicaNode, ok := sf.ReplicaNodeById(node.Id())
 				if !ok || !replicaNode.IsAllInfoReceived() {
-					log.Println("Send shared files info message")
-					s.fileInfoer.SendFileInfo(*sf, node.Id())
+					files = append(files, *sf)
 				} else if len(sf.Checksum()) > 0 && !replicaNode.IsCompleteMsgSent() {
 					log.Println("Send 'complete state message'")
 					// only send complete message once, 'completeMsgSent' is internal state, does not get shared!
@@ -77,6 +77,8 @@ func (s *ShareService) sendSharedFileInfo() {
 					s.fileInfoer.SendCompleteMsg(*sf, node.Id())
 				}
 			}
+			log.Println("Send shared files info message")
+			s.fileInfoer.SendFilesInfo(files, node.Id())
 		}
 		s.mu.Unlock()
 		// wait
